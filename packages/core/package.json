@@ -1,0 +1,61 @@
+{
+  "name": "@umar0x/decompress",
+  "version": "1.0.0",
+  "description": "Secure archive extraction for Node.js. Hardened against Zip Slip, symlink escapes, hardlink escapes, unsafe permissions, Windows path tricks, and zip bombs.",
+  "license": "MIT",
+  "author": "umar0x <hello@umar.ac>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/umar0x/decompress.git",
+    "directory": "packages/core"
+  },
+  "homepage": "https://github.com/umar0x/decompress#readme",
+  "bugs": "https://github.com/umar0x/decompress/issues",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "sideEffects": false,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "extract",
+    "archive",
+    "zip",
+    "tar",
+    "gzip",
+    "bzip2",
+    "decompress",
+    "unzip",
+    "secure",
+    "zip-slip",
+    "symlink"
+  ],
+  "dependencies": {
+    "tar-stream": "^3.1.7",
+    "yauzl": "^3.2.0",
+    "unbzip2-stream": "^1.4.3"
+  }
+}
