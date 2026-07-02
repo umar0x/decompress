@@ -1,0 +1,14 @@
+node_modules/
+dist/
+*.tsbuildinfo
+coverage/
+.nyc_output/
+*.log
+.DS_Store
+*.tmp
+.decompress-tmp-*
+packages/benchmarks/results.md
+.env
+.env.*
+!.env.example
+*.lcov

@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+packages/*/dist/
+*.tar
+*.tar.gz
+*.tar.bz2
+*.zip

@@ -1,0 +1,62 @@
+{
+  "name": "decompress",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Secure archive extraction for Node.js monorepo",
+  "author": "umar0x <hello@umar.ac>",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "npm@11.17.0",
+  "workspaces": [
+    "packages/*"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "npm run build --workspace @umar0x/decompress && npm run build --workspace @umar0x/decompress-compatible && npm run build --workspace @umar0x/decompress-cli",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "pretest": "npm run build --workspace @umar0x/decompress && npm run build --workspace @umar0x/decompress-compatible && npm run build --workspace @umar0x/decompress-cli",
+    "test": "npm run test:nobuild",
+    "test:nobuild": "node scripts/run-tests.mjs all spec",
+    "test:unit": "node scripts/run-tests.mjs unit spec",
+    "test:integration": "node scripts/run-tests.mjs integration spec",
+    "test:security": "node scripts/run-tests.mjs security spec",
+    "test:compat": "node scripts/run-tests.mjs compat spec",
+    "coverage": "c8 --all --include packages/core/src/**/*.ts --exclude packages/core/src/**/*.d.ts --check-coverage --lines 85 --statements 85 --functions 90 --branches 80 --reporter=text --reporter=lcov node scripts/run-tests.mjs core spec",
+    "fuzz:smoke": "node scripts/run-tests.mjs fuzz spec",
+    "bench": "node --import tsx packages/benchmarks/run.ts",
+    "test:pack": "npm run build && node scripts/verify-packages.mjs",
+    "test:pack:nobuild": "node scripts/verify-packages.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "release:check": "npm run verify:release && npm run build && npm run typecheck && npm run lint && npm run format:check && npm run test:nobuild && npm run coverage && npm run test:pack:nobuild && npm audit --audit-level=low",
+    "changeset": "changeset",
+    "version-packages": "changeset version",
+    "release": "npm run release:check && npm run publish:packages",
+    "publish:packages": "npm publish --workspace @umar0x/decompress --access public --provenance && npm publish --workspace @umar0x/decompress-compatible --access public --provenance && npm publish --workspace @umar0x/decompress-cli --access public --provenance"
+  },
+  "devDependencies": {
+    "@changesets/cli": "^2.27.12",
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^22.0.0",
+    "@types/tar-stream": "^3.1.4",
+    "@types/yauzl": "^3.4.0",
+    "c8": "^11.0.0",
+    "eslint": "^10.7.0",
+    "prettier": "^3.9.5",
+    "tsup": "^8.5.1",
+    "tsx": "^4.20.6",
+    "typescript": "^5.6.2",
+    "typescript-eslint": "^8.63.0"
+  },
+  "overrides": {
+    "esbuild": "0.28.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "fsevents": false
+  }
+}
