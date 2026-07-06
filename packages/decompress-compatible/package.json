@@ -1,0 +1,55 @@
+{
+  "name": "@umar0x/decompress-compatible",
+  "version": "1.0.0",
+  "description": "Security-first migration adapter for kevva/decompress",
+  "license": "MIT",
+  "author": "umar0x <hello@umar.ac>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/umar0x/decompress.git",
+    "directory": "packages/decompress-compatible"
+  },
+  "homepage": "https://github.com/umar0x/decompress#readme",
+  "bugs": "https://github.com/umar0x/decompress/issues",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "sideEffects": false,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup && tsc -p tsconfig.build.json",
+    "prepack": "npm run build"
+  },
+  "keywords": [
+    "decompress",
+    "extract",
+    "zip",
+    "tar",
+    "secure",
+    "migration",
+    "compatible"
+  ],
+  "dependencies": {
+    "@umar0x/decompress": "^1.0.0"
+  }
+}
