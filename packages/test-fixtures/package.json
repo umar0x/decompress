@@ -1,0 +1,14 @@
+{
+  "name": "@umar0x/decompress-test-fixtures",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Test fixtures (benign + malicious) for decompress",
+  "scripts": {
+    "generate": "tsx build-malicious.ts"
+  },
+  "dependencies": {
+    "tar-stream": "^3.1.7",
+    "yauzl": "^3.2.0"
+  }
+}
