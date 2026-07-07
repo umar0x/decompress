@@ -1,0 +1,53 @@
+name: Bug report
+description: Report a reproducible problem with extraction, listing, audit, or the CLI
+title: '[Bug]: '
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Do not report security vulnerabilities here. Use the private security advisory link instead.
+  - type: input
+    id: version
+    attributes:
+      label: Package and version
+      placeholder: '@umar0x/decompress 1.0.0'
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      placeholder: 'Node 24.1.0, npm 11.5.1, Ubuntu 24.04'
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: Archive format
+      options: [ZIP, TAR, TAR.GZ, TAR.BZ2, Custom plugin, Not archive-specific]
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include the expected result, actual result, and complete error code/message.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Minimal reproduction
+      description: Provide code and a minimal non-sensitive fixture or a script that generates it.
+      render: javascript
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checklist
+      options:
+        - label: I tested the latest released version.
+          required: true
+        - label: This report does not contain secrets or a private vulnerability.
+          required: true
