@@ -1,6 +1,6 @@
 {
   "name": "@umar0x/decompress",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Secure archive extraction for Node.js. Hardened against Zip Slip, symlink escapes, hardlink escapes, unsafe permissions, Windows path tricks, and zip bombs.",
   "license": "MIT",
   "author": "umar0x <hello@umar.ac>",

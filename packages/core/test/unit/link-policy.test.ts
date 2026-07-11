@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import nodePath from 'node:path';
-import { mkdtemp, mkdir, writeFile, symlink, rm } from 'node:fs/promises';
+import { mkdtemp, mkdir, realpath, writeFile, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 import { validateSymlinkTarget, validateHardlinkTarget } from '../../src/policy/link-policy.ts';
@@ -18,7 +18,9 @@ import {
 async function makeTempOutput(): Promise<string> {
   const dir = await mkdtemp(nodePath.join(tmpdir(), 'decompress-link-test-'));
   await mkdir(nodePath.join(dir, 'sub'), { recursive: true });
-  return dir;
+  // Resolve symlinks so realpath checks inside validateSymlinkTarget/validateHardlinkTarget
+  // see the same prefix (macOS tmp dirs live under /var -> /private/var).
+  return realpath(dir);
 }
 
 test('validateSymlinkTarget: refused by default', async () => {
@@ -91,14 +93,16 @@ test('validateSymlinkTarget: parent-escape target rejected', async () => {
 
 test('validateSymlinkTarget: symlink chain escape rejected via realpath', async (t) => {
   const out = await makeTempOutput();
+  // Create a real file outside the output directory so realpath can resolve it.
+  const outsideDir = await mkdtemp(nodePath.join(tmpdir(), 'decompress-outside-'));
+  await writeFile(nodePath.join(outsideDir, 'target.txt'), 'outside');
   try {
-    // Plant a link that resolves outside the output.
-    if (!(await createSymlinkOrSkip(t, nodePath.parse(out).root, nodePath.join(out, 'inner'))))
-      return;
-    // Realpath validation must detect the escape.
+    // Plant a link inside output pointing to the outside directory.
+    if (!(await createSymlinkOrSkip(t, outsideDir, nodePath.join(out, 'inner')))) return;
+    // Realpath validation must detect the escape: inner/target.txt resolves outside.
     await assert.rejects(
       () =>
-        validateSymlinkTarget('inner/passwd', out, {
+        validateSymlinkTarget('inner/target.txt', out, {
           allowSymlinks: true,
           allowHardlinks: false,
           realOutputPath: out,
@@ -107,6 +111,7 @@ test('validateSymlinkTarget: symlink chain escape rejected via realpath', async 
     );
   } finally {
     await rm(out, { recursive: true, force: true });
+    await rm(outsideDir, { recursive: true, force: true });
   }
 });
 

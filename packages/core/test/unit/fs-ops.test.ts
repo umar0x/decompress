@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import nodePath from 'node:path';
 import {
@@ -35,7 +35,7 @@ test('safeWriteAll retries partial writes until the complete buffer is written',
 });
 
 test('filesystem wrappers create, write, link, rename, and remove safely', async () => {
-  const root = await mkdtemp(nodePath.join(tmpdir(), 'fs-ops-test-'));
+  const root = await realpath(await mkdtemp(nodePath.join(tmpdir(), 'fs-ops-test-')));
   try {
     const directory = nodePath.join(root, 'dir');
     await safeMkdir(directory, { mode: 0o700 });

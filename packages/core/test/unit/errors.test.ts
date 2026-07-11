@@ -52,10 +52,7 @@ test('DecompressError is the base class for all subclasses', () => {
     new NotADirectoryError('x'),
   ];
   for (const e of errors) {
-    assert.ok(
-      e instanceof DecompressError,
-      `${e.constructor.name} not instanceof DecompressError`,
-    );
+    assert.ok(e instanceof DecompressError, `${e.constructor.name} not instanceof DecompressError`);
     assert.equal(e.isDecompressError, true);
   }
 });

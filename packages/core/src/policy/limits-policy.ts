@@ -34,7 +34,10 @@ export function parseSize(input: SizeInput): number {
     }
     return input;
   }
-  const match = /^\s*(\d+(?:\.\d+)?)\s*([a-z]*)\s*$/i.exec(input);
+  if (input.length > 64) {
+    throw new InvalidInputError(`size string too long: ${JSON.stringify(input)}`);
+  }
+  const match = /^(\d+(?:\.\d+)?)\s*([a-z]*)$/i.exec(input.trim());
   if (!match) {
     throw new InvalidInputError(`unrecognized size string: ${JSON.stringify(input)}`);
   }

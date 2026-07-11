@@ -1,7 +1,7 @@
 {
   "name": "decompress",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "Secure archive extraction for Node.js monorepo",
   "author": "umar0x <hello@umar.ac>",
   "license": "MIT",
@@ -36,7 +36,7 @@
     "changeset": "changeset",
     "version-packages": "changeset version",
     "release": "npm run release:check && npm run publish:packages",
-    "publish:packages": "npm publish --workspace @umar0x/decompress --access public --provenance && npm publish --workspace @umar0x/decompress-compatible --access public --provenance && npm publish --workspace @umar0x/decompress-cli --access public --provenance"
+    "publish:packages": "npm publish --workspace @umar0x/decompress --access public --provenance && sleep 5 && npm publish --workspace @umar0x/decompress-compatible --access public --provenance && sleep 5 && npm publish --workspace @umar0x/decompress-cli --access public --provenance"
   },
   "devDependencies": {
     "@changesets/cli": "^2.27.12",
