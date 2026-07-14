@@ -20,3 +20,5 @@ export { sanitizeMode } from './policy/permission-policy.ts';
 export { parseSize, resolveLimits } from './policy/limits-policy.ts';
 export { DEFAULT_LIMITS } from './types.ts';
 export { validateSymlinkTarget, validateHardlinkTarget } from './policy/link-policy.ts';
+
+export { validateArchiveEntry, validateMappedEntry } from './entry-validation.ts';
