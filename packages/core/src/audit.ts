@@ -10,13 +10,13 @@ import type {
   PluginArchiveInput,
   Limits,
   PathCtx,
-  ArchivePlugin,
+  Warning,
 } from './types.ts';
 import { resolveInput } from './input-utils.ts';
 import { detectFormat, isEmptyTar } from './detect-format.ts';
-import { getBuiltinPlugins } from './plugins/registry.ts';
+import { selectPlugins } from './plugin-selection.ts';
+import { validateArchiveEntry } from './entry-validation.ts';
 import { resolveLimits } from './policy/limits-policy.ts';
-import { wrapLegacyPlugin } from './plugins/legacy-adapter.ts';
 import {
   validatePath,
   normalizePath,
@@ -26,13 +26,20 @@ import {
   WINDOWS_DEVICE_NAME_REGEX,
   NTFS_ADS_REGEX,
 } from './writer/path-security.ts';
-import {
-  AbortError,
-  UnknownFormatError,
-  LegacyPluginNotEnabledError,
-  isDecompressError,
-} from './errors.ts';
+import { AbortError, UnknownFormatError, isDecompressError } from './errors.ts';
 
+/**
+ * Audit an archive for risk-relevant findings without extracting it.
+ *
+ * Returns a deterministic, finite, JSON-serializable risk report. Plugin
+ * records are structurally validated before any field access, and numeric
+ * aggregates are guarded to remain finite safe integers so the report can
+ * always be serialized without loss.
+ *
+ * Audit is not a malware scan and not a safe-to-extract verdict. It reduces
+ * risk by surfacing suspicious metadata; callers must still enforce policy
+ * at extraction time.
+ */
 export async function auditArchive(
   input: ArchiveInput,
   options?: AuditOptions,
@@ -41,16 +48,14 @@ export async function auditArchive(
   const signal = opts.signal;
   if (signal?.aborted) throw new AbortError(signal);
 
-  const limits = resolveLimits(
-    stripUndefined({
-      maxFiles: opts.maxFiles,
-      maxTotalSize: opts.maxTotalSize,
-      maxArchiveSize: opts.maxArchiveSize,
-      maxEntrySize: opts.maxEntrySize,
-      maxDepth: opts.maxDepth,
-      maxCompressionRatio: opts.maxCompressionRatio,
-    }),
-  );
+  const limits = resolveLimits({
+    maxFiles: opts.maxFiles,
+    maxTotalSize: opts.maxTotalSize,
+    maxArchiveSize: opts.maxArchiveSize,
+    maxEntrySize: opts.maxEntrySize,
+    maxDepth: opts.maxDepth,
+    maxCompressionRatio: opts.maxCompressionRatio,
+  });
   const resolved = await resolveInput(input, {
     maxArchiveSize: limits.maxArchiveSize,
     signal,
@@ -60,12 +65,32 @@ export async function auditArchive(
     let format = detectFormat(resolved.peek);
     if (format === null && isEmptyTar(resolved.peek, resolved.size)) format = 'tar';
 
-    const plugins = getAuditPlugins(opts, format, resolved.peek);
+    const plugins = selectPlugins({
+      plugins: opts.plugins,
+      legacyPluginUnsafe: opts.legacyPluginUnsafe,
+      format,
+      peek: resolved.peek,
+    });
     if (plugins.length === 0) {
       throw new UnknownFormatError(`no plugin for format: ${format ?? 'unknown'}`);
     }
 
-    const parseCtx: ParseContext = { warn: () => {} };
+    // Capture parser warnings as low severity findings so corruption
+    // signals from the parser surface in the report.
+    const findings: AuditFinding[] = [];
+    const warnings: Warning[] = [];
+    const parseCtx: ParseContext = {
+      warn: (code, message, details) => {
+        const warning: Warning = { code, message, details };
+        warnings.push(warning);
+        findings.push({
+          code: code ?? 'parser_warning',
+          severity: 'low',
+          message,
+          details,
+        });
+      },
+    };
     const pluginInput: PluginArchiveInput = {
       stream: resolved.stream,
       buffer: resolved.buffer,
@@ -75,15 +100,15 @@ export async function auditArchive(
       signal: signal ?? new AbortController().signal,
     };
 
-    const findings: AuditFinding[] = [];
     const entrySummaries: AuditReport['entries'] = [];
     let totalSize = 0;
     let entryCount = 0;
+    let totalOverflowed = false;
 
     const allowSymlinks = opts.allowSymlinks ?? false;
     const allowHardlinks = opts.allowHardlinks ?? false;
     const platform = detectPlatform();
-    const pathCtx = {
+    const pathCtx: PathCtx = {
       platform,
       caseInsensitive: process.platform === 'win32' || process.platform === 'darwin',
       limits,
@@ -92,7 +117,15 @@ export async function auditArchive(
     const caseFoldedPaths = new Map<string, string>();
 
     archiveLoop: for (const plugin of plugins) {
+      let entryIndex = 0;
       for await (const raw of plugin.parse(pluginInput, parseCtx)) {
+        if (signal?.aborted) throw new AbortError(signal);
+
+        // Validate the record before any field access to prevent raw
+        // TypeErrors from malformed plugin output.
+        validateArchiveEntry(raw, { pluginName: plugin.name, entryIndex });
+        entryIndex++;
+
         entryCount++;
         if (entryCount > limits.maxFiles) {
           findings.push({
@@ -103,7 +136,29 @@ export async function auditArchive(
           });
           break archiveLoop;
         }
-        totalSize += raw.size ?? 0;
+
+        // Guard arithmetic so totals stay finite and safe. A plugin record
+        // with a huge but valid size must not produce an Infinity total.
+        const entrySize = raw.size ?? 0;
+        if (!totalOverflowed) {
+          const candidate = totalSize + entrySize;
+          if (!Number.isSafeInteger(candidate)) {
+            totalOverflowed = true;
+            findings.push({
+              code: 'total_size_overflow',
+              severity: 'critical',
+              message: `cumulative entry size exceeded safe-integer range; totalSize clamped to maxTotalSize ${limits.maxTotalSize}`,
+              details: {
+                lastTotal: totalSize,
+                attemptedAdd: entrySize,
+                limit: limits.maxTotalSize,
+              },
+            });
+            totalSize = Math.min(totalSize, limits.maxTotalSize);
+          } else {
+            totalSize = candidate;
+          }
+        }
 
         const entryFindings = auditEntry(raw, {
           allowSymlinks,
@@ -148,16 +203,17 @@ export async function auditArchive(
         details: { total: totalSize, limit: limits.maxTotalSize },
       });
     }
-    if (resolved.size > 0) {
-      const ratio = totalSize / resolved.size;
-      if (ratio > limits.maxCompressionRatio) {
-        findings.push({
-          code: 'excessive_compression_ratio',
-          severity: 'high',
-          message: `compression ratio ${ratio.toFixed(1)} exceeds maxCompressionRatio ${limits.maxCompressionRatio}`,
-          details: { ratio, limit: limits.maxCompressionRatio },
-        });
-      }
+
+    // Never emit a non-finite compressionRatio. JSON.stringify would turn
+    // Infinity or NaN into null and break the report contract.
+    const compressionRatio = computeFiniteRatio(totalSize, resolved.size);
+    if (resolved.size > 0 && compressionRatio > limits.maxCompressionRatio) {
+      findings.push({
+        code: 'excessive_compression_ratio',
+        severity: 'high',
+        message: `compression ratio ${compressionRatio.toFixed(1)} exceeds maxCompressionRatio ${limits.maxCompressionRatio}`,
+        details: { ratio: compressionRatio, limit: limits.maxCompressionRatio },
+      });
     }
 
     if (entryCount > 1000) {
@@ -170,14 +226,13 @@ export async function auditArchive(
     }
 
     const riskLevel = computeRiskLevel(findings);
-    const compressionRatio = resolved.size > 0 ? totalSize / resolved.size : 0;
 
     return {
       riskLevel,
       detectedFormats: [format ?? plugins[0]!.name],
-      totalSize,
+      totalSize: finiteSafeNumber(totalSize),
       compressionRatio,
-      entryCount,
+      entryCount: finiteSafeNumber(entryCount),
       findings,
       entries: entrySummaries,
     };
@@ -434,32 +489,29 @@ function linkTargetEscapes(
   return windowsRelative === '..' || windowsRelative.startsWith(`..${nodePath.win32.sep}`);
 }
 
-const formatMap: Record<string, string> = {
-  zip: 'zip',
-  tar: 'tar',
-  gz: 'tar.gz',
-  bz2: 'tar.bz2',
-};
+/**
+ * Compute a finite compression ratio. Returns 0 when archiveSize is 0 or
+ * non-finite, otherwise returns totalSize / archiveSize clamped to a finite
+ * safe value.
+ */
+function computeFiniteRatio(totalSize: number, archiveSize: number): number {
+  if (!Number.isFinite(archiveSize) || archiveSize <= 0) return 0;
+  if (!Number.isFinite(totalSize) || totalSize < 0) return 0;
+  const ratio = totalSize / archiveSize;
+  if (!Number.isFinite(ratio)) return Number.MAX_SAFE_INTEGER;
+  return ratio;
+}
 
-function getAuditPlugins(opts: AuditOptions, format: string | null, peek: Buffer): ArchivePlugin[] {
-  if (opts.plugins && opts.plugins.length > 0) {
-    const plugins = opts.plugins.map((plugin, index) => {
-      if (typeof plugin === 'function' || !('parse' in plugin)) {
-        if (!opts.legacyPluginUnsafe) {
-          throw new LegacyPluginNotEnabledError('legacy plugins require legacyPluginUnsafe: true');
-        }
-        return wrapLegacyPlugin(
-          `legacy-${index}`,
-          plugin as unknown as Parameters<typeof wrapLegacyPlugin>[1],
-        );
-      }
-      return plugin;
-    });
-    const detected = plugins.filter((plugin) => plugin.detect?.(peek) === true);
-    return detected.length > 0 ? detected : plugins.length === 1 ? plugins : [];
+/**
+ * Coerce a numeric report field to a finite safe integer. If the input is
+ * not finite or out of safe range, returns 0 (the only neutral value for a
+ * count/size that cannot be reported precisely).
+ */
+function finiteSafeNumber(value: number): number {
+  if (!Number.isFinite(value) || !Number.isSafeInteger(value)) {
+    return Number.isFinite(value) ? Math.trunc(value) : 0;
   }
-  if (format === null) return [];
-  return getBuiltinPlugins().filter((plugin) => plugin.name === formatMap[format]);
+  return value;
 }
 
 /** Remove keys with undefined values (for exactOptionalPropertyTypes compatibility). */
