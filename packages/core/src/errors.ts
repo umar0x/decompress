@@ -14,7 +14,6 @@ export const ErrorCode = {
   WindowsTrailingDots: 'PATH_WINDOWS_TRAILING_DOTS',
   DuplicatePath: 'DUPLICATE_PATH',
   CaseCollision: 'CASE_COLLISION',
-  UnicodeCollision: 'UNICODE_COLLISION',
   LinkPolicy: 'LINK_POLICY_VIOLATION',
   LinkEscape: 'LINK_ESCAPE',
   SymlinkRefused: 'LINK_SYMLINK_REFUSED',
@@ -38,7 +37,6 @@ export const ErrorCode = {
   Abort: 'ABORTED',
   Plugin: 'PLUGIN_ERROR',
   PluginInvalidEntry: 'PLUGIN_INVALID_ENTRY',
-  PluginCalledFs: 'PLUGIN_FS_ACCESS',
   LegacyPluginNotEnabled: 'LEGACY_PLUGIN_NOT_ENABLED',
   UnsupportedFormat: 'UNSUPPORTED_FORMAT',
   UserFunction: 'USER_FUNCTION_ERROR',
@@ -168,9 +166,6 @@ export class CaseCollisionError extends PathPolicyError {
     super(`case collision: "${normalized}" conflicts with existing "${existing}"`, opts);
     this.existing = existing;
   }
-}
-export class UnicodeCollisionError extends PathPolicyError {
-  override readonly code: string = ErrorCode.UnicodeCollision;
 }
 
 // Link errors
@@ -317,17 +312,24 @@ export class PluginError extends DecompressError {
   readonly pluginName?: string;
   constructor(
     message: string,
-    opts?: { pluginName?: string; cause?: unknown; entryPath?: string },
+    opts?: { pluginName?: string; cause?: unknown; entryPath?: string; entryIndex?: number },
   ) {
-    super(message, { cause: opts?.cause, entryPath: opts?.entryPath });
-    if (opts?.pluginName) this.pluginName = opts.pluginName;
+    super(message, {
+      cause: opts?.cause,
+      entryPath: opts?.entryPath,
+      entryIndex: opts?.entryIndex,
+    });
+    if (opts?.pluginName !== undefined) this.pluginName = opts.pluginName;
   }
 }
 export class PluginInvalidEntryError extends PluginError {
   override readonly code: string = ErrorCode.PluginInvalidEntry;
-}
-export class PluginCalledFsError extends PluginError {
-  override readonly code: string = ErrorCode.PluginCalledFs;
+  constructor(
+    message: string,
+    opts?: { pluginName?: string; cause?: unknown; entryPath?: string; entryIndex?: number },
+  ) {
+    super(message, opts);
+  }
 }
 export class LegacyPluginNotEnabledError extends DecompressError {
   override readonly code: string = ErrorCode.LegacyPluginNotEnabled;
