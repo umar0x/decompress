@@ -53,19 +53,22 @@ It is a migration bridge, not a claim of byte-for-byte parity for every undocume
 
 ### Intentional differences
 
-| Previous behavior                               | Adapter/native behavior                                        | Migration action                                        |
-| ----------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------- |
-| Symlinks and hardlinks commonly enabled         | Refused by default                                             | Enable only for trusted use cases and audit the archive |
-| Partial output on error                         | New output absent on error                                     | Do not rely on partial extraction                       |
-| No resource ceilings                            | Six conservative limits                                        | Raise only the specific limit required by the workload  |
-| `map()` may create arbitrary paths              | Mapped paths are revalidated                                   | Keep mapped paths relative and contained                |
-| Special permission bits may survive in metadata | Setuid/setgid/sticky always stripped                           | Use `rawMode` for inspection only                       |
-| Existing output may be merged                   | Non-empty output rejected, or wholly replaced with `overwrite` | Choose a fresh destination or explicit replacement      |
-| Legacy plugin accepted implicitly               | Requires `legacyPluginUnsafe: true`                            | Prefer built-in/native plugins                          |
-| Very old Node versions                          | Node 20+                                                       | Upgrade the runtime                                     |
-| CJS-only package                                | ESM and CJS                                                    | Both import styles are supported                        |
-| No cancellation                                 | `AbortSignal`                                                  | Wire request cancellation to `signal`                   |
-| Silent platform link fallback                   | Explicit `symlinkFallback`                                     | Select `error`, `hardlink`, or `skip` deliberately      |
+| Previous behavior                                   | Adapter/native behavior                                        | Migration action                                        |
+| --------------------------------------------------- | -------------------------------------------------------------- | ------------------------------------------------------- |
+| Symlinks and hardlinks commonly enabled             | Refused by default                                             | Enable only for trusted use cases and audit the archive |
+| Partial output on error                             | New output absent on error                                     | Do not rely on partial extraction                       |
+| No resource ceilings                                | Six conservative limits                                        | Raise only the specific limit required by the workload  |
+| `map()` may create arbitrary paths                  | Mapped paths are revalidated                                   | Keep mapped paths relative and contained                |
+| Special permission bits may survive in metadata     | Setuid/setgid/sticky always stripped                           | Use `rawMode` for inspection only                       |
+| Existing output may be merged                       | Non-empty output rejected, or wholly replaced with `overwrite` | Choose a fresh destination or explicit replacement      |
+| Legacy plugin accepted implicitly                   | Requires `legacyPluginUnsafe: true`                            | Prefer built-in/native plugins                          |
+| Very old Node versions                              | Node 22+ (1.0.0 floor)                                         | Upgrade the runtime                                     |
+| CJS-only package                                    | ESM and CJS                                                    | Both import styles are supported                        |
+| No cancellation                                     | `AbortSignal`                                                  | Wire request cancellation to `signal`                   |
+| Silent platform link fallback                       | Explicit `symlinkFallback`                                     | Select `error`, `hardlink`, or `skip` deliberately      |
+| Malformed plugin output silently returned           | Structurally rejected by all three public APIs (1.0.0)         | Audit and fix faulty plugins; they now fail closed      |
+| Non-finite audit numbers (`Infinity` → JSON `null`) | Audit numbers are always finite safe integers (1.0.0)          | Update consumers that assumed `null` meant "unknown"    |
+| Unbounded compatibility memory                      | `maxInMemorySize` ceiling (default 256 MiB) (1.0.0)            | Raise explicitly for trusted large-archive workloads    |
 
 ### Legacy plugins
 
