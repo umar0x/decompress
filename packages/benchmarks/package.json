@@ -1,11 +1,11 @@
 {
   "name": "@umar0x/decompress-benchmarks",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Benchmarks vs decompress and @xhmikosr/decompress",
   "dependencies": {
-    "@umar0x/decompress": "0.0.1",
-    "@umar0x/decompress-compatible": "0.0.1"
+    "@umar0x/decompress": "1.0.0",
+    "@umar0x/decompress-compatible": "1.0.0"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@umar0x/decompress-test-fixtures",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "type": "module",
   "description": "Test fixtures (benign + malicious) for decompress",

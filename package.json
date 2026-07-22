@@ -1,7 +1,7 @@
 {
   "name": "decompress",
   "private": true,
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Secure archive extraction for Node.js monorepo",
   "author": "umar0x <hello@umar.ac>",
   "license": "MIT",
