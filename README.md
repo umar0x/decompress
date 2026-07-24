@@ -1,6 +1,6 @@
 # @umar0x/decompress
 
-Secure, bounded archive extraction for Node.js 20+. The native structured API supports ZIP,
+Secure, bounded archive extraction for Node.js 22+. The native structured API supports ZIP,
 TAR, TAR.GZ, and TAR.BZ2, with ESM and CommonJS builds.
 
 This project is an alternative to the unmaintained `decompress` package. Its primary product is
@@ -73,27 +73,30 @@ const report = await auditArchive('archive.zip', {
 ## Security model
 
 Every entry, including entries emitted by plugins and transformed by `map`, passes through the
-same policy and writer. Important enforced properties are:
+same structural validator and the same policy/writer pipeline. Important enforced properties are:
 
-| Area        | Enforced behavior                                                                                                                           |
-| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| Paths       | Reject empty/NUL, absolute, drive/UNC, traversal, NTFS ADS, device names, trailing dots/spaces, invalid Windows characters, excessive depth |
-| Identity    | NFC normalization, duplicate detection, case-collision detection on case-insensitive systems, post-map validation                           |
-| Links       | Symlinks and hardlinks refused by default; opted-in targets are containment checked; hardlinks are dependency ordered                       |
-| Writes      | Private staging directory, no-follow/exclusive file creation, ancestor checks, partial-write loops, safe default modes                      |
-| Permissions | Setuid, setgid, and sticky bits are always stripped; archive modes are optional                                                             |
-| Resources   | Maximum archive bytes, entries, total output bytes, entry bytes, path depth, and compression ratio                                          |
-| Failure     | Abort-aware cleanup and commit-time rename; a new output is absent on extraction failure                                                    |
-| Formats     | Unsupported entry types, encrypted ZIP entries, and corrupt input fail with typed errors                                                    |
-| Plugins     | Plugin entries are untrusted and revalidated; legacy plugins require `legacyPluginUnsafe: true`                                             |
+| Area        | Enforced behavior                                                                                                                                                                                                                           |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Paths       | Reject empty/NUL, absolute, drive/UNC, traversal, NTFS ADS, device names, trailing dots/spaces, invalid Windows characters, excessive depth. Raw archive paths are validated before `strip` and again after `strip`/`map` (1.0.0 contract). |
+| Identity    | NFC normalization, duplicate detection, case-collision detection on case-insensitive systems, post-map validation                                                                                                                           |
+| Links       | Symlinks and hardlinks refused by default; opted-in targets are containment checked; hardlinks are dependency ordered                                                                                                                       |
+| Writes      | Private staging directory, no-follow/exclusive file creation, ancestor checks, partial-write loops, safe default modes                                                                                                                      |
+| Permissions | Setuid, setgid, and sticky bits are always stripped; archive modes are optional                                                                                                                                                             |
+| Resources   | Maximum archive bytes, entries, total output bytes, entry bytes, path depth, and compression ratio                                                                                                                                          |
+| Failure     | Abort-aware cleanup and commit-time rename; a new output is absent on extraction failure                                                                                                                                                    |
+| Formats     | Unsupported entry types, encrypted ZIP entries, and corrupt input fail with typed errors                                                                                                                                                    |
+| Plugins     | Plugin records are structurally validated before all public API processing (`extract`, `listArchive`, `auditArchive`). Legacy plugins require `legacyPluginUnsafe: true`.                                                                   |
+| Audit       | Numeric report fields are always finite, JSON-serializable safe integers (1.0.0 contract; no `Infinity`/`NaN`/`null`).                                                                                                                      |
 
 Default limits are 512 MiB archive input, 10,000 entries, 2 GiB total output, 512 MiB per entry,
-128 path segments, and a 100:1 compression ratio. Choose lower, workload-specific limits when
-processing untrusted uploads.
+128 path segments, and a 100:1 compression ratio. The compatibility adapter caps in-memory
+buffered content at 256 MiB by default (`maxInMemorySize`). Choose lower, workload-specific
+limits when processing untrusted uploads.
 
 Third-party plugins are normal JavaScript running in your process. The plugin interface does not
 hand them an output path or writer, but it is not a sandbox and cannot prevent a malicious package
-from importing `node:fs` or using the network. Treat plugins as trusted code.
+from importing `node:fs` or using the network. Treat plugins as trusted code; their emitted
+records are untrusted data and are revalidated uniformly across all public APIs.
 
 See [the threat model](./docs/threat-model.md), [architecture](./docs/architecture.md), and
 [security policy](./SECURITY.md).
@@ -151,9 +154,10 @@ npm run test:pack
 npm audit
 ```
 
-The CI matrix targets Node 20, 22, and 24 on Linux, macOS, and Windows. Coverage gates are 85% for
-lines/statements, 90% for functions, and 80% for branches. Packaging verification installs the
-generated tarballs in a clean temporary project and exercises ESM, CommonJS, and the CLI.
+The CI matrix targets Node 22, 24, and 26 on Linux, macOS, and Windows. Coverage gates are 85% for
+lines/statements, 90% for functions, and 80% for branches, with per-critical-file floors on the
+audit and writer modules. Packaging verification installs the generated tarballs in a clean
+temporary project and exercises ESM, CommonJS, and the CLI.
 
 Maintainers should follow the [release guide](./docs/releasing.md) for tag validation, first
 publication, trusted publishing, and repository protection settings.

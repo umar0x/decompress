@@ -2,7 +2,6 @@ import { Readable } from 'node:stream';
 import type {
   ArchiveEntry,
   ArchiveInput,
-  ArchivePlugin,
   DupPolicy,
   Entry,
   ExtractOptions,
@@ -18,13 +17,13 @@ import {
   EntrySizeExceededError,
   FileCountExceededError,
   InvalidInputError,
-  LegacyPluginNotEnabledError,
+  TotalSizeExceededError,
   UnknownFormatError,
   UserFunctionError,
 } from './errors.ts';
 import { resolveInput } from './input-utils.ts';
-import { getBuiltinPlugins } from './plugins/registry.ts';
-import { wrapLegacyPlugin } from './plugins/legacy-adapter.ts';
+import { selectPlugins } from './plugin-selection.ts';
+import { validateArchiveEntry, validateMappedEntry } from './entry-validation.ts';
 import { resolveLimits } from './policy/limits-policy.ts';
 import { sanitizeMode } from './policy/permission-policy.ts';
 import { stripUndefined } from './utils.ts';
@@ -38,6 +37,19 @@ import {
   validatePath,
 } from './writer/path-security.ts';
 
+/**
+ * Extract a ZIP, TAR, TAR.GZ, or TAR.BZ2 archive into `output`.
+ *
+ * Extraction is atomic: a private sibling staging directory is populated and
+ * renamed to `output` only after every entry has been written successfully.
+ * On any failure (policy violation, I/O error, or abort) the staging tree is
+ * removed and `output` is left absent.
+ *
+ * @param input  Archive source: file path, Buffer, Node stream, Web stream, or async iterable.
+ * @param output Destination directory. Must be a non-empty string.
+ * @param options Optional extraction policy, limits, callbacks, and plugins.
+ * @throws {import('./errors.ts').DecompressError} subclass on any policy/limit/IO failure.
+ */
 export async function extract(
   input: ArchiveInput,
   output: string,
@@ -90,7 +102,12 @@ async function doExtract(
     let format = detectFormat(resolved.peek);
     if (format === null && isEmptyTar(resolved.peek, resolved.size)) format = 'tar';
 
-    const plugins = selectPlugins(opts, format, resolved.peek);
+    const plugins = selectPlugins({
+      plugins: opts.plugins,
+      legacyPluginUnsafe: opts.legacyPluginUnsafe,
+      format,
+      peek: resolved.peek,
+    });
     if (plugins.length === 0) {
       throw new UnknownFormatError(
         `could not detect archive format (first bytes: ${resolved.peek.subarray(0, 16).toString('hex')})`,
@@ -138,18 +155,21 @@ async function doExtract(
     let declaredTotal = 0;
 
     const processedEntries = (async function* (): AsyncIterable<ArchiveEntry> {
+      let entryIndex = 0;
       for await (const raw of plugin.parse(pluginInput, parseCtx)) {
         if (opts.signal?.aborted) throw new AbortError(opts.signal.reason);
-        validateArchiveEntry(raw, plugin.name);
+
+        validateArchiveEntry(raw, { pluginName: plugin.name, entryIndex });
+        entryIndex++;
+
         rawCount++;
         if (rawCount > limits.maxFiles) throw new FileCountExceededError(rawCount, limits.maxFiles);
         if (raw.size !== undefined) {
           if (raw.size > limits.maxEntrySize) {
             throw new EntrySizeExceededError(raw.path, raw.size, limits.maxEntrySize);
           }
-          declaredTotal += raw.size;
+          declaredTotal = safeAdd(declaredTotal, raw.size, raw.path);
           if (declaredTotal > limits.maxTotalSize) {
-            const { TotalSizeExceededError } = await import('./errors.ts');
             throw new TotalSizeExceededError(declaredTotal, limits.maxTotalSize);
           }
           if (resolved.size > 0 && declaredTotal / resolved.size > limits.maxCompressionRatio) {
@@ -159,6 +179,11 @@ async function doExtract(
             );
           }
         }
+
+        // Validate the raw archive path before applying strip so unsafe
+        // paths are rejected before any transformation. The stripped result
+        // is revalidated after map.
+        validatePath(raw.path, pathCtx, raw.path);
 
         let strippedPath = raw.path;
         if ((opts.strip ?? 0) > 0) {
@@ -335,28 +360,12 @@ function validateInteger(
   }
 }
 
-function validateArchiveEntry(entry: ArchiveEntry, pluginName: string): void {
-  if (!entry || typeof entry !== 'object') {
-    throw new InvalidInputError(`plugin ${pluginName} emitted a non-object entry`);
+function safeAdd(a: number, b: number, _entryPath: string): number {
+  const sum = a + b;
+  if (!Number.isSafeInteger(sum) || sum < 0) {
+    throw new TotalSizeExceededError(sum, Number.MAX_SAFE_INTEGER);
   }
-  if (
-    typeof entry.path !== 'string' ||
-    !['file', 'directory', 'symlink', 'hardlink'].includes(entry.type)
-  ) {
-    throw new InvalidInputError(`plugin ${pluginName} emitted an invalid entry`);
-  }
-  if (entry.size !== undefined && (!Number.isSafeInteger(entry.size) || entry.size < 0)) {
-    throw new InvalidInputError(`plugin ${pluginName} emitted an invalid size for ${entry.path}`);
-  }
-}
-
-function validateMappedEntry(entry: Entry): void {
-  if (!entry || typeof entry !== 'object' || typeof entry.path !== 'string') {
-    throw new InvalidInputError('map must return a valid Entry object');
-  }
-  if (!['file', 'directory', 'symlink', 'hardlink'].includes(entry.type)) {
-    throw new InvalidInputError(`map returned an invalid entry type: ${String(entry.type)}`);
-  }
+  return sum;
 }
 
 function stripSegments(path: string, count: number): string {
@@ -372,37 +381,4 @@ function toEntry(written: EntryResult, metadata: Entry): Entry {
     linkTarget: written.kind === 'symlink' || written.kind === 'hardlink' ? written.target : null,
     size: written.kind === 'file' ? written.bytes : 0,
   };
-}
-
-function selectPlugins(opts: ExtractOptions, format: string | null, peek: Buffer): ArchivePlugin[] {
-  if (opts.plugins && opts.plugins.length > 0) {
-    const plugins = opts.plugins.map((plugin, index) => {
-      if (typeof plugin === 'function' || !('parse' in plugin)) {
-        if (!opts.legacyPluginUnsafe) {
-          throw new LegacyPluginNotEnabledError('legacy plugins require legacyPluginUnsafe: true');
-        }
-        return wrapLegacyPlugin(
-          `legacy-${index}`,
-          plugin as unknown as Parameters<typeof wrapLegacyPlugin>[1],
-        );
-      }
-      return plugin;
-    });
-    const detected = plugins.filter((plugin) => plugin.detect?.(peek) === true);
-    if (detected.length > 0) return detected;
-    if (format !== null) {
-      const byFormat = plugins.filter((plugin) => plugin.formats.includes(format));
-      if (byFormat.length > 0) return byFormat;
-    }
-    return plugins.length === 1 ? plugins : [];
-  }
-
-  if (format === null) return [];
-  const formatMap: Record<string, string> = {
-    zip: 'zip',
-    tar: 'tar',
-    gz: 'tar.gz',
-    bz2: 'tar.bz2',
-  };
-  return getBuiltinPlugins().filter((plugin) => plugin.name === formatMap[format]);
 }

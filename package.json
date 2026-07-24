@@ -1,7 +1,7 @@
 {
   "name": "decompress",
   "private": true,
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Secure archive extraction for Node.js monorepo",
   "author": "umar0x <hello@umar.ac>",
   "license": "MIT",
@@ -11,7 +11,7 @@
     "packages/*"
   ],
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "build": "npm run build --workspace @umar0x/decompress && npm run build --workspace @umar0x/decompress-compatible && npm run build --workspace @umar0x/decompress-cli",
@@ -26,7 +26,7 @@
     "test:integration": "node scripts/run-tests.mjs integration spec",
     "test:security": "node scripts/run-tests.mjs security spec",
     "test:compat": "node scripts/run-tests.mjs compat spec",
-    "coverage": "c8 --all --include packages/core/src/**/*.ts --exclude packages/core/src/**/*.d.ts --check-coverage --lines 85 --statements 85 --functions 90 --branches 80 --reporter=text --reporter=lcov node scripts/run-tests.mjs core spec",
+    "coverage": "c8 --all --include 'packages/core/src/**/*.ts' --exclude 'packages/core/src/**/*.d.ts' --check-coverage --lines 85 --statements 85 --functions 90 --branches 80 --reporter=text --reporter=lcov node --import=tsx scripts/run-tests.mjs core spec",
     "fuzz:smoke": "node scripts/run-tests.mjs fuzz spec",
     "bench": "node --import tsx packages/benchmarks/run.ts",
     "test:pack": "npm run build && node scripts/verify-packages.mjs",

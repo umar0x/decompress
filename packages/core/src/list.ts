@@ -1,28 +1,34 @@
 import type {
   ArchiveInput,
-  ArchivePlugin,
   Entry,
   ListOptions,
   ParseContext,
   PluginArchiveInput,
   Warning,
+  Limits,
+  PathCtx,
 } from './types.ts';
 import { detectFormat, isEmptyTar } from './detect-format.ts';
-import { AbortError, LegacyPluginNotEnabledError, UnknownFormatError } from './errors.ts';
+import { AbortError, UnknownFormatError } from './errors.ts';
 import { resolveInput } from './input-utils.ts';
-import { getBuiltinPlugins } from './plugins/registry.ts';
-import { wrapLegacyPlugin } from './plugins/legacy-adapter.ts';
+import { selectPlugins } from './plugin-selection.ts';
+import { validateArchiveEntry } from './entry-validation.ts';
 import { checkFileCount, resolveLimits } from './policy/limits-policy.ts';
 import { sanitizeMode } from './policy/permission-policy.ts';
 import { detectPlatform, validatePath } from './writer/path-security.ts';
 
+/**
+ * List the entries of an archive without writing anything to disk.
+ *
+ * Plugin records are structurally validated before projection so the
+ * returned entries always carry typed fields. Path-policy violations are
+ * reported through `onWarning` rather than thrown, since listing returns
+ * archive facts, including unsafe ones, and is not extraction approval.
+ */
 export async function listArchive(input: ArchiveInput, options?: ListOptions): Promise<Entry[]> {
   const opts = options ?? {};
   if (opts.signal?.aborted) throw new AbortError(opts.signal.reason);
-  const limits = resolveLimits({
-    maxFiles: opts.maxFiles,
-    maxArchiveSize: opts.maxArchiveSize,
-  });
+  const limits = resolveListLimits(opts);
   const resolved = await resolveInput(input, {
     maxArchiveSize: limits.maxArchiveSize,
     signal: opts.signal,
@@ -31,7 +37,12 @@ export async function listArchive(input: ArchiveInput, options?: ListOptions): P
   try {
     let format = detectFormat(resolved.peek);
     if (format === null && isEmptyTar(resolved.peek, resolved.size)) format = 'tar';
-    const plugins = selectPlugins(opts, format, resolved.peek);
+    const plugins = selectPlugins({
+      plugins: opts.plugins,
+      legacyPluginUnsafe: opts.legacyPluginUnsafe,
+      format,
+      peek: resolved.peek,
+    });
     if (plugins.length === 0) throw new UnknownFormatError('could not detect archive format');
     const plugin = plugins[0]!;
     const warnings: Warning[] = [];
@@ -50,7 +61,7 @@ export async function listArchive(input: ArchiveInput, options?: ListOptions): P
       hints: format ? [format] : [plugin.name],
       signal: opts.signal ?? new AbortController().signal,
     };
-    const pathCtx = {
+    const pathCtx: PathCtx = {
       platform: detectPlatform(),
       caseInsensitive: false,
       limits,
@@ -60,6 +71,10 @@ export async function listArchive(input: ArchiveInput, options?: ListOptions): P
     let count = 0;
 
     for await (const raw of plugin.parse(pluginInput, parseCtx)) {
+      if (opts.signal?.aborted) throw new AbortError(opts.signal.reason);
+
+      validateArchiveEntry(raw, { pluginName: plugin.name, entryIndex: count });
+
       count++;
       checkFileCount(count, limits);
       try {
@@ -91,33 +106,9 @@ export async function listArchive(input: ArchiveInput, options?: ListOptions): P
   }
 }
 
-const formatMap: Record<string, string> = {
-  zip: 'zip',
-  tar: 'tar',
-  gz: 'tar.gz',
-  bz2: 'tar.bz2',
-};
-
-function selectPlugins(opts: ListOptions, format: string | null, peek: Buffer): ArchivePlugin[] {
-  if (opts.plugins && opts.plugins.length > 0) {
-    const plugins = opts.plugins.map((plugin, index) => {
-      if (typeof plugin === 'function' || !('parse' in plugin)) {
-        if (!opts.legacyPluginUnsafe) {
-          throw new LegacyPluginNotEnabledError('legacy plugins require legacyPluginUnsafe: true');
-        }
-        return wrapLegacyPlugin(
-          `legacy-${index}`,
-          plugin as unknown as Parameters<typeof wrapLegacyPlugin>[1],
-        );
-      }
-      return plugin;
-    });
-    return plugins.filter((plugin) => plugin.detect?.(peek) === true).length > 0
-      ? plugins.filter((plugin) => plugin.detect?.(peek) === true)
-      : plugins.length === 1
-        ? plugins
-        : [];
-  }
-  if (format === null) return [];
-  return getBuiltinPlugins().filter((plugin) => plugin.name === formatMap[format]);
+function resolveListLimits(opts: ListOptions): Limits {
+  return resolveLimits({
+    maxFiles: opts.maxFiles,
+    maxArchiveSize: opts.maxArchiveSize,
+  });
 }

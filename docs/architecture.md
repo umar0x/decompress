@@ -61,10 +61,16 @@ falling back to a non-atomic copy.
 ## Atomic replacement
 
 For a new destination, staging is renamed into place only after extraction succeeds. For
-`overwrite: true`, an existing destination is first renamed to a random backup, staging is renamed
-to the destination, and the backup is removed. If the second rename fails, restoration is
-attempted. A hard crash can leave a staging or backup directory; callers may remove only known
-`.decompress-tmp-*` or `.decompress-backup-*` siblings after verifying no extraction is active.
+`overwrite: true`, an existing destination is first renamed to a random backup named
+`${dest}.old.${uuid}`, staging is renamed to the destination, and the backup is removed. If the
+second rename fails, restoration is attempted. A hard crash (SIGKILL or power loss) can leave a
+staging directory named `.decompress-tmp-*` or a backup directory named `${dest}.old.*`; callers
+may remove only those recognizable siblings after verifying no extraction is active, and must
+never glob-delete arbitrary `${dest}.old.*` paths without parent/name validation.
+
+Namespace atomicity is not power-loss durability. Directory `fsync` is intentionally not
+implemented; if durability becomes a requirement, design it as a separately tested opt-in feature
+with platform semantics, not an incidental call added to the extraction hot path.
 
 ## Hardlink ordering and directory metadata
 
@@ -88,8 +94,12 @@ is not on the performance-critical product path.
 ## Verification gates
 
 - Strict TypeScript build and ESLint/Prettier checks.
-- Unit, integration, security regression, compatibility, CLI, and deterministic fuzz suites.
-- Global coverage thresholds: 85% lines/statements, 90% functions, 80% branches.
-- Node 20, 22, and 24 CI across Linux, macOS, and Windows.
+- Unit, integration, security regression (including a dedicated plugin record contract suite),
+  compatibility, CLI, and deterministic fuzz suites.
+- Global coverage thresholds: 85% lines/statements, 90% functions, 80% branches, with
+  per-critical-file floors on `audit.ts` and `secure-writer.ts` at 85% lines and 80% branches.
+- Node 22, 24, and 26 CI across Linux, macOS, and Windows; symlink/hardlink POSIX capability is
+  asserted on the Linux runner so link tests cannot silently skip.
 - Tarball smoke installation covering ESM, CommonJS, and the published CLI binary.
-- `npm audit`, secret scanning, and provenance-enabled publish workflow.
+- `npm audit`, `npm audit signatures`, SBOM generation, and provenance-enabled publish workflow.
+- A scheduled benchmark/fuzz job with a pinned Linux runner, time budget, and artifact upload.

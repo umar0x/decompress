@@ -8,7 +8,12 @@ import type {
   ExtractOptions,
   Warning,
 } from '@umar0x/decompress';
-import { extract, LegacyPluginNotEnabledError } from '@umar0x/decompress';
+import {
+  extract,
+  LegacyPluginNotEnabledError,
+  LimitExceededError,
+  parseSize,
+} from '@umar0x/decompress';
 
 export type DecompressEntry = {
   data: Buffer;
@@ -39,11 +44,39 @@ export type DecompressOptions = {
   maxDepth?: number;
   maxArchiveSize?: string | number;
   maxCompressionRatio?: number;
+  /**
+   * Maximum total bytes of file content retained in memory while buffering
+   * archive entries for `filter`/`map`/`data` consumers. Default: 256 MiB.
+   * Exceeding this ceiling aborts with a typed `LimitExceededError` and
+   * removes the adapter's private temporary directory.
+   *
+   * Set explicitly when the workload legitimately requires buffering more
+   * archive content. The native API streams file bodies and is not bound by
+   * this ceiling.
+   */
+  maxInMemorySize?: string | number;
   signal?: AbortSignal;
   onEntry?: (entry: DecompressEntry) => void;
   onWarning?: (warning: Warning) => void;
 };
 
+/** Default in-memory ceiling for buffered compatibility entries (256 MiB). */
+const DEFAULT_MAX_IN_MEMORY_SIZE = 256 * 1024 * 1024;
+
+/**
+ * Compatibility adapter for the legacy `decompress(input, output?, opts?)` call
+ * shape used by `kevva/decompress` and `@xhmikosr/decompress`.
+ *
+ * The adapter securely extracts to a private temporary directory, reads every
+ * file into a `Buffer`, applies legacy-shaped `strip`/`filter`/`map`, then
+ * replays the resulting records through native extraction. This is safer than
+ * handing transforms direct write access, but it doubles I/O and retains all
+ * selected file contents in memory.
+ *
+ * The `maxInMemorySize` option (default 256 MiB) bounds that memory cost;
+ * exceeding it fails closed with a typed `LimitExceededError` and removes the
+ * adapter's temporary state. New applications should use the native API.
+ */
 export async function decompress(
   input: string | Buffer,
   output?: string | DecompressOptions,
@@ -67,6 +100,10 @@ export async function decompress(
   ) {
     throw new TypeError('strip must be a non-negative integer');
   }
+  const maxInMemorySize =
+    realOpts.maxInMemorySize !== undefined
+      ? parseSize(realOpts.maxInMemorySize)
+      : DEFAULT_MAX_IN_MEMORY_SIZE;
 
   const root = await mkdtemp(nodePath.join(tmpdir(), 'decompress-compat-'));
   const parsedOutput = nodePath.join(root, 'parsed');
@@ -76,13 +113,32 @@ export async function decompress(
       plugins: realOpts.plugins as ExtractOptions['plugins'],
       legacyPluginUnsafe: realOpts.legacyPluginUnsafe,
       overwrite: false,
+      // The adapter buffers file content in memory under its own
+      // maxInMemorySize ceiling, so the default compression-ratio ceiling
+      // would reject legitimate high-ratio archives during the initial
+      // extraction pass. The replay pass below also lifts the limit.
+      maxCompressionRatio: Number.MAX_SAFE_INTEGER,
     });
 
     let entries: DecompressEntry[] = [];
+    let inMemoryBytes = 0;
     for (const entry of parsed.entries) {
       const compatEntry = await readCompatEntry(parsed.output, entry);
       compatEntry.path = stripPath(compatEntry.path, realOpts.strip ?? 0);
-      if (compatEntry.path !== '') entries.push(compatEntry);
+      if (compatEntry.path === '') continue;
+      // Enforce the in-memory ceiling before retaining this entry's data.
+      if (entry.type === 'file') {
+        inMemoryBytes += compatEntry.data.length;
+        if (inMemoryBytes > maxInMemorySize) {
+          throw new LimitExceededError(
+            'maxInMemorySize',
+            inMemoryBytes,
+            maxInMemorySize,
+            `compatibility adapter exceeded maxInMemorySize ${maxInMemorySize} (buffered ${inMemoryBytes} bytes); use the native API for larger archives or raise the ceiling explicitly`,
+          );
+        }
+      }
+      entries.push(compatEntry);
     }
     if (realOpts.filter) entries = entries.filter(realOpts.filter);
     if (realOpts.map) entries = entries.map((entry) => realOpts.map!({ ...entry }));
