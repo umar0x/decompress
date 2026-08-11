@@ -39,7 +39,7 @@
     "publish:packages": "npm publish --workspace @umar0x/decompress --access public --provenance && sleep 5 && npm publish --workspace @umar0x/decompress-compatible --access public --provenance && sleep 5 && npm publish --workspace @umar0x/decompress-cli --access public --provenance"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.31.1",
+    "@changesets/cli": "^3.0.0",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.1.2",
     "@types/tar-stream": "^3.1.4",
