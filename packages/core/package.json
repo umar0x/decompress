@@ -54,7 +54,7 @@
     "symlink"
   ],
   "dependencies": {
-    "tar-stream": "^3.1.7",
+    "tar-stream": "^3.2.1",
     "yauzl": "^3.2.0",
     "unbzip2-stream": "^1.4.3"
   }
