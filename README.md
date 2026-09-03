@@ -143,13 +143,11 @@ Exit codes are `0` for success, `1` for an extraction/policy error or a high/cri
 ## Performance
 
 On a 2-vCPU Linux host with a corpus spanning 100 to 5,000-file archives, 128 MiB single files,
-60-level nesting, unicode names, and mixed permissions (5-run medians, all raw data published in
-[docs/benchmarks](./docs/benchmarks/)): this library leads both `decompress` 4.2.1 and
-`@xhmikosr/decompress` 11.1.4 on every throughput-heavy and concurrent scenario, with 10 to 25
-times lower peak memory on large single files (streaming writer against whole-archive buffering).
-`@xhmikosr/decompress` keeps a 3 to 15 ms edge on tiny archives, the price this library pays for
-atomic staging and per-entry policy validation. The comparison data and methodology live beside
-the claims, not in marketing copy.
+60-level nesting, unicode names, and mixed permissions (5-run medians): this library leads both
+`decompress` 4.2.1 and `@xhmikosr/decompress` 11.1.4 on every throughput-heavy and concurrent
+scenario, with 10 to 25 times lower peak memory on large single files (streaming writer against
+whole-archive buffering). `@xhmikosr/decompress` keeps a 3 to 15 ms edge on tiny archives, the
+price this library pays for atomic staging and per-entry policy validation.
 
 ## Formats and dependencies
 
@@ -179,8 +177,8 @@ percent lines/statements, 90 percent functions, and 80 percent branches, with pe
 floors enforced from lcov output. Packaging verification installs the generated tarballs in a
 clean temporary project and exercises ESM, CommonJS, and the CLI.
 
-Maintainers should follow the [release guide](./docs/releasing.md) for tag validation,
-publication, trusted publishing, and repository protection settings.
+Maintainers cut releases by pushing a `v*.*.*` tag. The Release workflow runs the full release
+check, publishes the packages, and attaches the generated SBOM to the GitHub release.
 
 ## License
 
