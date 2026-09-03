@@ -1,7 +1,7 @@
 {
   "name": "decompress",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Secure archive extraction for Node.js monorepo",
   "author": "umar0x <hello@umar.ac>",
   "license": "MIT",
@@ -26,7 +26,7 @@
     "test:integration": "node scripts/run-tests.mjs integration spec",
     "test:security": "node scripts/run-tests.mjs security spec",
     "test:compat": "node scripts/run-tests.mjs compat spec",
-    "coverage": "c8 --all --include 'packages/core/src/**/*.ts' --exclude 'packages/core/src/**/*.d.ts' --check-coverage --lines 85 --statements 85 --functions 90 --branches 80 --reporter=text --reporter=lcov node --import=tsx scripts/run-tests.mjs core spec",
+    "coverage": "c8 --all --include 'packages/core/src/**/*.ts' --exclude 'packages/core/src/**/*.d.ts' --check-coverage --lines 85 --statements 85 --functions 90 --branches 80 --reporter=text --reporter=lcov node --import=tsx scripts/run-tests.mjs core spec && node scripts/check-coverage-floors.mjs coverage/lcov.info",
     "fuzz:smoke": "node scripts/run-tests.mjs fuzz spec",
     "bench": "node --import tsx packages/benchmarks/run.ts",
     "test:pack": "npm run build && node scripts/verify-packages.mjs",
@@ -39,22 +39,23 @@
     "publish:packages": "npm publish --workspace @umar0x/decompress --access public --provenance && sleep 5 && npm publish --workspace @umar0x/decompress-compatible --access public --provenance && sleep 5 && npm publish --workspace @umar0x/decompress-cli --access public --provenance"
   },
   "devDependencies": {
-    "@changesets/cli": "^2.31.1",
+    "@changesets/cli": "^3.0.1",
     "@eslint/js": "^10.0.1",
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.4.1",
     "@types/tar-stream": "^3.1.4",
     "@types/yauzl": "^3.4.0",
     "c8": "^12.0.0",
-    "eslint": "^10.8.0",
+    "eslint": "^10.9.1",
     "prettier": "^3.9.6",
     "tsup": "^8.5.1",
-    "tsx": "^4.23.1",
-    "typescript": "^5.6.2",
-    "typescript-eslint": "^8.65.0"
+    "tsx": "^4.23.13",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.69.0"
   },
   "overrides": {
-    "brace-expansion": "5.0.8",
-    "esbuild": "0.28.1"
+    "brace-expansion": "5.0.9",
+    "esbuild": "0.28.1",
+    "tar-stream": "3.2.0"
   },
   "allowScripts": {
     "esbuild@0.28.1": true,

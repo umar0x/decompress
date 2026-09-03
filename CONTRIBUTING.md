@@ -5,7 +5,7 @@ tests that demonstrate both success and fail-closed behavior.
 
 ## Setup
 
-Requirements: Node 20+ and npm 10+.
+Requirements: Node 22+ and npm 10+.
 
 ```sh
 npm install

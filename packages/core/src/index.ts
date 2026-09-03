@@ -9,6 +9,7 @@ export {
   isInsideOutput,
   validatePath,
   normalizePath,
+  stripDotSegments,
   checkDuplicate,
   checkCaseCollision,
   WINDOWS_DEVICE_NAME_REGEX,

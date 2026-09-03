@@ -1,6 +1,6 @@
 {
   "name": "@umar0x/decompress",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Secure archive extraction for Node.js. Hardened against Zip Slip, symlink escapes, hardlink escapes, unsafe permissions, Windows path tricks, and zip bombs.",
   "license": "MIT",
   "author": "umar0x <hello@umar.ac>",
@@ -54,8 +54,8 @@
     "symlink"
   ],
   "dependencies": {
-    "tar-stream": "^3.1.7",
-    "yauzl": "^3.2.0",
+    "tar-stream": "^3.2.0",
+    "yauzl": "^3.4.0",
     "unbzip2-stream": "^1.4.3"
   }
 }

@@ -33,6 +33,7 @@ export async function listArchive(input: ArchiveInput, options?: ListOptions): P
     maxArchiveSize: limits.maxArchiveSize,
     signal: opts.signal,
   });
+  const teardown: Array<() => void> = [];
 
   try {
     let format = detectFormat(resolved.peek);
@@ -60,6 +61,7 @@ export async function listArchive(input: ArchiveInput, options?: ListOptions): P
       size: resolved.size,
       hints: format ? [format] : [plugin.name],
       signal: opts.signal ?? new AbortController().signal,
+      teardown,
     };
     const pathCtx: PathCtx = {
       platform: detectPlatform(),
@@ -102,6 +104,13 @@ export async function listArchive(input: ArchiveInput, options?: ListOptions): P
     }
     return output;
   } finally {
+    for (const fn of teardown) {
+      try {
+        fn();
+      } catch {
+        // Teardown must not mask the primary outcome.
+      }
+    }
     await resolved.cleanup();
   }
 }

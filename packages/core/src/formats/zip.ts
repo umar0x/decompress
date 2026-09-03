@@ -59,11 +59,26 @@ async function* parseZip(
     ): string;
   };
   let zipfile: yauzl.ZipFile | undefined;
+  // The archive handle stays open until the pipeline tears down: concurrent
+  // writers open lazy entry streams while other workers are still pulling
+  // metadata, so closing when this generator completes would race them. The
+  // API entry point runs the registered teardown after extraction finishes
+  // (success, failure, or abort).
+  let closeScheduled = false;
+  const closeArchive = () => {
+    if (zipfile && !closeScheduled) {
+      closeScheduled = true;
+      zipfile.close();
+    }
+  };
+  input.teardown?.push(closeArchive);
+  let entriesDrained = false;
   try {
     zipfile = input.buffer
       ? await yauzlModern.fromBufferPromise(input.buffer, options)
       : await yauzlModern.openPromise(input.filePath!, options);
     const archive = zipfile;
+
     for await (const entry of archive.eachEntry()) {
       if (input.signal.aborted) throw new AbortError(input.signal.reason);
       if (!entry.canDecodeFileData()) {
@@ -116,13 +131,17 @@ async function* parseZip(
         },
       };
     }
+    entriesDrained = true;
   } catch (error) {
+    closeArchive();
     if (error instanceof AbortError || error instanceof CorruptArchiveError) throw error;
     throw new CorruptArchiveError(`invalid ZIP archive: ${(error as Error).message}`, {
       cause: error,
     });
   } finally {
-    zipfile?.close();
+    // If the generator is abandoned before draining (consumer error), close
+    // here as well; success and normal-drain paths rely on pipeline teardown.
+    if (!entriesDrained) closeArchive();
   }
 }
 

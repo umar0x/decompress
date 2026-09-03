@@ -7,6 +7,7 @@ import {
   isInsideOutput,
   validatePath,
   normalizePath,
+  stripDotSegments,
   checkDuplicate,
   checkCaseCollision,
   detectPlatform,
@@ -164,9 +165,22 @@ test('validatePath: rejects trailing separators', () => {
   assert.throws(() => validatePath('foo\\', winCtx), PathPolicyError);
 });
 
-test('validatePath: rejects current-directory segments', () => {
-  assert.throws(() => validatePath('./foo', posixCtx), PathPolicyError);
-  assert.throws(() => validatePath('foo/./bar', posixCtx), PathPolicyError);
+test('validatePath: current-directory segments are normalized away', () => {
+  // '.' segments are semantically neutral (e.g. `tar czf x.tgz .` produces
+  // './file' entries), so they are stripped before validation instead of
+  // rejected. Parent traversal ('..') remains rejected.
+  assert.equal(stripDotSegments('./foo'), 'foo');
+  assert.equal(stripDotSegments('foo/./bar'), 'foo/bar');
+  assert.equal(stripDotSegments('foo'), 'foo');
+  assert.equal(stripDotSegments('.'), '');
+  assert.equal(stripDotSegments('././'), '');
+  assert.doesNotThrow(() => validatePath('./foo', posixCtx));
+  assert.doesNotThrow(() => validatePath('foo/./bar', posixCtx));
+  // A path that is only dot segments is rejected as empty.
+  assert.throws(() => validatePath('.', posixCtx), PathPolicyError);
+  assert.throws(() => validatePath('././', posixCtx), PathPolicyError);
+  // Backslash-carrying paths are validated as-is (not rewritten).
+  assert.throws(() => validatePath('foo\\.\\bar', posixCtx), PathPolicyError);
 });
 
 test('validatePath: rejects parent-directory segments', () => {

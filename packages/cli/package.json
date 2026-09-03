@@ -1,6 +1,6 @@
 {
   "name": "@umar0x/decompress-cli",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "CLI for secure archive extraction with extract, list, and audit commands",
   "license": "MIT",
   "author": "umar0x <hello@umar.ac>",
@@ -44,6 +44,6 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@umar0x/decompress": "^1.0.0"
+    "@umar0x/decompress": "^1.0.2"
   }
 }

@@ -22,6 +22,21 @@ export const NTFS_ADS_REGEX = /:[^/\\]/;
 const MAX_PATH_LEN = 4096;
 
 /**
+ * Remove no-op '.' path segments (leading './' and interior '/./'). Dot
+ * segments are semantically neutral, so stripping them before validation lets
+ * archives produced by commands like `tar czf archive.tgz .` extract while
+ * every other path rule stays unchanged. A path consisting only of dot
+ * segments ('.', '././') normalizes to '' and is rejected as empty.
+ */
+export function stripDotSegments(p: string): string {
+  if (!p.includes('.')) return p;
+  const segs = p.split(/[\\/]/);
+  const kept = segs.filter((s) => s !== '.');
+  if (kept.length === segs.length) return p;
+  return kept.join('/');
+}
+
+/**
  * Return true iff `target` is inside `root` (or equal to `root`).
  * Uses path.relative instead of substring prefix matching.
  */
@@ -37,17 +52,22 @@ export function isInsideOutput(target: string, root: string): boolean {
 
 /**
  * Reject paths that violate the path-policy. Throws PathPolicyError (or subclass)
- * on any violation. This runs on the raw archive-declared path.
+ * on any violation. This runs on the raw archive-declared path after dot-segment
+ * normalization; the original path is preserved in `entryPath` context fields.
  */
-export function validatePath(raw: string, ctx: PathCtx, entryPath?: string): void {
-  if (raw.includes('\0')) {
-    throw new NulByteError(`NUL byte in path: ${raw}`, { entryPath });
+export function validatePath(rawInput: string, ctx: PathCtx, entryPath?: string): void {
+  // Dot stripping must not rewrite paths that still carry backslashes; those
+  // are either rejected below (POSIX) or normalized later (Windows), and the
+  // rejection messages should reference the original bytes.
+  const canStrip = !rawInput.includes('\\');
+  const raw = canStrip ? stripDotSegments(rawInput) : rawInput;
+  if (rawInput.includes('\0') || raw.includes('\0')) {
+    throw new NulByteError(`NUL byte in path: ${rawInput}`, { entryPath });
   }
 
   if (raw.length === 0 || raw.trim().length === 0) {
     throw new PathPolicyError(`empty path`, { entryPath });
   }
-
   if ([...raw].some((character) => character.codePointAt(0)! < 0x20)) {
     throw new PathPolicyError(`control character in path: ${JSON.stringify(raw)}`, { entryPath });
   }
@@ -119,10 +139,6 @@ export function validatePath(raw: string, ctx: PathCtx, entryPath?: string): voi
   }
   if (raw.endsWith('/') || raw.endsWith('\\')) {
     throw new PathPolicyError(`trailing separator in path: ${raw}`, { entryPath });
-  }
-
-  if (segs.includes('.')) {
-    throw new PathPolicyError(`'.' segment in path: ${raw}`, { entryPath });
   }
 
   if (segs.length > ctx.limits.maxDepth) {

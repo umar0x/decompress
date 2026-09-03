@@ -66,9 +66,10 @@ It is a migration bridge, not a claim of byte-for-byte parity for every undocume
 | CJS-only package                                    | ESM and CJS                                                    | Both import styles are supported                        |
 | No cancellation                                     | `AbortSignal`                                                  | Wire request cancellation to `signal`                   |
 | Silent platform link fallback                       | Explicit `symlinkFallback`                                     | Select `error`, `hardlink`, or `skip` deliberately      |
-| Malformed plugin output silently returned           | Structurally rejected by all three public APIs (1.0.0)         | Audit and fix faulty plugins; they now fail closed      |
-| Non-finite audit numbers (`Infinity` → JSON `null`) | Audit numbers are always finite safe integers (1.0.0)          | Update consumers that assumed `null` meant "unknown"    |
-| Unbounded compatibility memory                      | `maxInMemorySize` ceiling (default 256 MiB) (1.0.0)            | Raise explicitly for trusted large-archive workloads    |
+| Malformed plugin output silently returned           | Structurally rejected by all three public APIs (1.x)           | Audit and fix faulty plugins; they now fail closed      |
+| Non-finite audit numbers (`Infinity` → JSON `null`) | Audit numbers are always finite safe integers (1.x)            | Update consumers that assumed `null` meant "unknown"    |
+| Unbounded compatibility memory                      | `maxInMemorySize` ceiling (default 256 MiB) (1.x)              | Raise explicitly for trusted large-archive workloads    |
+| Sequential writes                                   | ZIP writes use a bounded worker pool (default 8)               | Set `concurrency: 1` for strictly sequential writes     |
 
 ### Legacy plugins
 

@@ -11,6 +11,7 @@ import {
   rm,
   readdir,
   readFile,
+  realpath,
   lstat,
   stat,
 } from 'node:fs/promises';
@@ -53,6 +54,29 @@ function defaultPolicy() {
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(nodePath.join(tmpdir(), 'decompress-writer-test-'));
+}
+
+/**
+ * Build a WriteContext the way atomicExtract does: with a canonical
+ * (realpath-resolved) output root. macOS and Windows hand out non-canonical
+ * temp paths (/var vs /private/var, RUNNER~1 vs runneradmin) and the link
+ * policy compares realpath results against the root, so a lexical root
+ * produces false LINK_ESCAPE rejections on those platforms.
+ */
+async function makeWriterCtx(output: string, policy = defaultPolicy()) {
+  const realOutputPath = await realpath(output);
+  return {
+    ctx: {
+      realOutputPath,
+      umask: 0o022,
+      limits: DEFAULT_LIMITS,
+      policy,
+      createdDirs: new Set([realOutputPath]),
+      warnings: [],
+      pathCtx: { platform: 'posix' as const, caseInsensitive: false, limits: DEFAULT_LIMITS },
+    },
+    realOutputPath,
+  };
 }
 
 test('atomicExtract: writes a file and a directory atomically', async () => {
@@ -536,6 +560,131 @@ test('cleanupTempDir: refuses to delete non-temp paths (safety guard)', async ()
     // out should still exist.
     const st = await lstat(out);
     assert.ok(st.isDirectory());
+  } finally {
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test('writeEntry: overwrite policy replaces existing files, symlinks, and hardlinks', async () => {
+  const out = await makeTempDir();
+  const output = nodePath.join(out, 'result');
+  await mkdir(output, { recursive: true });
+  const { ctx, realOutputPath: canonical } = await makeWriterCtx(output);
+
+  try {
+    // File overwrite: existing file is replaced.
+    await writeFile(nodePath.join(output, 'file.txt'), Buffer.from('OLD'));
+    const r1 = await writeEntry(
+      makeEntry({ path: 'file.txt', buffer: async () => Buffer.from('NEW') }),
+      { ...ctx, policy: { ...ctx.policy, overwrite: true } },
+    );
+    assert.equal(r1.kind, 'file');
+    assert.equal(await readFile(nodePath.join(output, 'file.txt'), 'utf8'), 'NEW');
+
+    // Directory overwrite: existing directory is accepted.
+    await mkdir(nodePath.join(output, 'existing-dir'));
+    const r2 = await writeEntry(makeEntry({ path: 'existing-dir', type: 'directory' }), {
+      ...ctx,
+      policy: { ...ctx.policy, overwrite: true },
+    });
+    assert.equal(r2.kind, 'directory');
+
+    // Symlink overwrite: existing symlink is replaced.
+    await symlink('somewhere', nodePath.join(output, 'link'));
+    const r3 = await writeEntry(
+      makeEntry({ path: 'link', type: 'symlink', linkTarget: 'file.txt' }),
+      { ...ctx, policy: { ...ctx.policy, overwrite: true, allowSymlinks: true } },
+    );
+    assert.equal(r3.kind, 'symlink');
+    assert.equal(await readFile(nodePath.join(canonical, 'link'), 'utf8'), 'NEW');
+
+    // Hardlink overwrite: existing path is unlinked and the hardlink lands.
+    await writeFile(nodePath.join(output, 'hl'), Buffer.from('TO-BE-REPLACED'));
+    const r4 = await writeEntry(
+      makeEntry({ path: 'hl', type: 'hardlink', linkTarget: 'file.txt' }),
+      { ...ctx, policy: { ...ctx.policy, overwrite: true, allowHardlinks: true } },
+    );
+    assert.equal(r4.kind, 'hardlink');
+    assert.equal(await readFile(nodePath.join(canonical, 'hl'), 'utf8'), 'NEW');
+  } finally {
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test('writeEntry: pre-existing parent directories that are not symlinks are accepted', async () => {
+  const out = await makeTempDir();
+  const output = nodePath.join(out, 'result');
+  await mkdir(nodePath.join(output, 'nested', 'deep'), { recursive: true });
+  try {
+    const { ctx, realOutputPath: canonical } = await makeWriterCtx(output);
+    const r = await writeEntry(
+      makeEntry({ path: 'nested/deep/file.txt', buffer: async () => Buffer.from('X') }),
+      ctx,
+    );
+    assert.equal(r.kind, 'file');
+    assert.equal((r as { bytes: number }).bytes, 1);
+    // The EEXIST verification path cached the pre-existing directories.
+    assert.ok(ctx.createdDirs.has(nodePath.join(canonical, 'nested')));
+    assert.ok(ctx.createdDirs.has(nodePath.join(canonical, 'nested', 'deep')));
+  } finally {
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test('writeEntry: a symlink planted as an ancestor is rejected on first touch', async () => {
+  const out = await makeTempDir();
+  const output = nodePath.join(out, 'result');
+  await mkdir(output, { recursive: true });
+  const { ctx } = await makeWriterCtx(output, { ...defaultPolicy(), allowSymlinks: true });
+  try {
+    // Simulate an earlier extraction step that planted a symlink directory.
+    await symlink('/etc', nodePath.join(output, 'trap'));
+    await assert.rejects(
+      writeEntry(
+        makeEntry({ path: 'trap/passwd-copy', buffer: async () => Buffer.from('X') }),
+        ctx,
+      ),
+      LinkThroughSymlinkError,
+    );
+  } finally {
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test('writeEntry: canonical root through a symlinked parent keeps in-root link targets valid', async (t) => {
+  // atomicExtract always hands the writer a realpath-resolved output root.
+  // On macOS and Windows the requested output is routinely non-canonical
+  // (/var vs /private/var, RUNNER~1 vs runneradmin). This pins the contract
+  // on every platform by deriving the root through a symlink alias, the same
+  // lexical-to-canonical shape, and writing link entries whose targets exist
+  // so validation goes through its realpath comparison branch.
+  const out = await makeTempDir();
+  const realRoot = nodePath.join(out, 'real-root');
+  await mkdir(realRoot, { recursive: true });
+  const alias = nodePath.join(out, 'alias-root');
+  if (!(await createSymlinkOrSkip(t, 'real-root', alias))) return;
+
+  const { ctx, realOutputPath: canonical } = await makeWriterCtx(alias, {
+    ...defaultPolicy(),
+    allowSymlinks: true,
+    allowHardlinks: true,
+  });
+  try {
+    await writeFile(nodePath.join(canonical, 'target.txt'), Buffer.from('T'));
+
+    const r1 = await writeEntry(
+      makeEntry({ path: 'sym', type: 'symlink', linkTarget: 'target.txt' }),
+      ctx,
+    );
+    assert.equal(r1.kind, 'symlink');
+    assert.equal(await readFile(nodePath.join(canonical, 'sym'), 'utf8'), 'T');
+
+    const r2 = await writeEntry(
+      makeEntry({ path: 'hard', type: 'hardlink', linkTarget: 'target.txt' }),
+      ctx,
+    );
+    assert.equal(r2.kind, 'hardlink');
+    assert.equal(await readFile(nodePath.join(canonical, 'hard'), 'utf8'), 'T');
   } finally {
     await rm(out, { recursive: true, force: true });
   }
