@@ -29,6 +29,15 @@ import {
 import { validateSymlinkTarget, validateHardlinkTarget } from '../policy/link-policy.ts';
 
 export type WriteContext = {
+  /**
+   * Canonical (realpath-resolved) absolute output root. atomicExtract computes
+   * it once and it is part of this context's contract: link policy compares
+   * realpath-resolved link targets against this root, so a lexical root makes
+   * legitimate in-root targets look like escapes on platforms whose requested
+   * paths are non-canonical (macOS /var vs /private/var, Windows 8.3 short
+   * names). Callers constructing a context by hand must realpath the root
+   * first, exactly like atomicExtract does.
+   */
   realOutputPath: string;
   signal?: AbortSignal;
   umask: number;

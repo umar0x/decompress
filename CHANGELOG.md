@@ -66,9 +66,15 @@ republishing those slots, so the first stable release is 1.0.2.
 
 ### Testing and quality
 
-- 299 tests (was 278): new concurrency suite (output tree identity across concurrency levels,
+- 300 tests (was 278): new concurrency suite (output tree identity across concurrency levels,
   ordered callbacks, atomic failure, mtime correctness), dot-segment compatibility suite, and
   legacy adapter unit tests.
+- Direct-writer tests now canonicalize the output root with realpath the same way the extractor
+  does. macOS and Windows hand out non-canonical temp paths (/var vs /private/var, RUNNER~1 vs
+  runneradmin), which made the link policy's realpath comparison reject legitimate in-root link
+  targets on those platforms. The canonical-root requirement is now documented on
+  WriteContext.realOutputPath and pinned by a regression test that derives the root through a
+  symlink alias on every platform.
 - Coverage 92.5 percent lines, 84.5 percent branches, 96.6 percent functions (was 89.0, 84.5,
   94.3). secure-writer.ts coverage rose from 70.2 to 87.3 percent lines, the legacy adapter
   from 31.8 to 97.6 percent.
