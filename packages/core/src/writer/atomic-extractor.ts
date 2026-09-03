@@ -232,10 +232,11 @@ export async function atomicExtract(
       opts.onEntry?.(r, originalIndex);
       opts.onProgress?.(processedCount, knownTotal, ctx.budget!.totalBytes);
     } else {
-      const bytes = ctx.budget!.totalBytes;
       emitOrdered(originalIndex, (emitted) => {
         opts.onEntry?.(r, originalIndex);
-        opts.onProgress?.(emitted, knownTotal, bytes);
+        // Read the byte count at emission time so the onProgress sequence
+        // stays monotonic regardless of write completion order.
+        opts.onProgress?.(emitted, knownTotal, ctx.budget!.totalBytes);
       });
     }
   }
