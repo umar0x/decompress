@@ -88,6 +88,13 @@ export type ExtractOptions = {
   allowHardlinks?: boolean;
   symlinkFallback?: 'error' | 'hardlink' | 'skip';
   preservePermissions?: boolean;
+  /**
+   * Maximum entries written concurrently (1-32, default 8). All policy
+   * validation happens before writes and the output commit stays atomic, so
+   * this only changes write scheduling. TAR-family formats remain
+   * sequential because their entry bodies are ordered streams.
+   */
+  concurrency?: number;
   maxArchiveSize?: SizeInput;
   maxFiles?: number;
   maxTotalSize?: SizeInput;
@@ -147,6 +154,14 @@ export type PluginArchiveInput = {
   readonly size: number | undefined;
   readonly hints: readonly string[];
   readonly signal: AbortSignal;
+  /**
+   * Teardown callbacks for parser-owned resources (file handles). The API
+   * entry point runs them after the pipeline finishes, whether it succeeded,
+   * failed, or aborted. Parsers that keep handles open past metadata draining
+   * (random-access formats with lazy body streams) must register cleanup here
+   * instead of closing when their generator completes.
+   */
+  readonly teardown?: Array<() => void>;
 };
 
 export type ParseContext = {

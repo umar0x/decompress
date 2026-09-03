@@ -1,6 +1,6 @@
 # Releasing
 
-## First publication
+## Publication
 
 The three public packages must be published in dependency order: core, compatibility adapter, then
 CLI. The release workflow already uses that order.
@@ -9,7 +9,7 @@ CLI. The release workflow already uses that order.
 2. Run `npm run release:check` from a clean checkout.
 3. Create a granular npm automation token authorized for the `@umar0x` scope and store it as the
    `NPM_TOKEN` GitHub Actions secret.
-4. Push an annotated `v0.0.1` tag that points to the reviewed commit.
+4. Push an annotated `v1.0.2` tag that points to the reviewed commit.
 5. Verify all three npm packages, provenance attestations, the GitHub release, and the attached
    CycloneDX SBOM.
 

@@ -1,7 +1,7 @@
 import nodePath from 'node:path';
 import type { ArchiveEntry, Limits, PathCtx, Warning } from '../types.ts';
 import { isInsideOutput, validatePath, normalizePath } from './path-security.ts';
-import { sanitizeMode, applyMtime } from './permissions.ts';
+import { sanitizeMode } from './permissions.ts';
 import {
   safeLstat,
   safeMkdir,
@@ -50,14 +50,25 @@ export type WriteContext = {
 };
 
 export type EntryResult =
-  | { kind: 'file'; path: string; mode: number; bytes: number }
-  | { kind: 'directory'; path: string; mode: number }
-  | { kind: 'symlink'; path: string; target: string }
+  | { kind: 'file'; path: string; mode: number; bytes: number; mtime: Date | null }
+  | { kind: 'directory'; path: string; mode: number; mtime: Date | null }
+  | { kind: 'symlink'; path: string; target: string; mtime: Date | null }
   | { kind: 'hardlink'; path: string; target: string };
 
 /**
  * Write a single archive entry to disk under ctx.realOutputPath.
  * Throws a subclass of DecompressError on any policy violation or I/O failure.
+ *
+ * Ancestor containment: `ensureParentInside` is the single authority. Each
+ * directory below the staging root is created by this writer or verified with
+ * one lstat on first touch, then cached. The staging root is created with mode
+ * 0700 and owned by this process, so once a directory is verified no other
+ * process can replace it with a symlink underneath us.
+ *
+ * Final-component containment: files are opened with O_CREAT | O_EXCL |
+ * O_NOFOLLOW, so the kernel refuses to create through an existing path or a
+ * symlink. Directories, symlinks, and hardlinks rely on their EEXIST handling,
+ * which lstats the destination before any destructive action.
  */
 export async function writeEntry(entry: ArchiveEntry, ctx: WriteContext): Promise<EntryResult> {
   // abort check (between entries)
@@ -100,8 +111,14 @@ export async function writeEntry(entry: ArchiveEntry, ctx: WriteContext): Promis
 }
 
 /**
- * Reject writes that would travel through a symlink planted at `dest` (or any ancestor
- * below realOutputPath). Defends against symlink-based traversal of the output tree.
+ * Reject writes that would travel through a symlink planted at `dest` (or any
+ * ancestor below realOutputPath). Defends against symlink-based traversal of
+ * the output tree.
+ *
+ * Retained as a standalone check for callers that need it; the hot entry path
+ * now relies on `ensureParentInside`'s cached ancestor verification plus
+ * kernel-level O_NOFOLLOW/O_EXCL enforcement, which provide the same
+ * guarantees without re-walking every component of every entry.
  */
 export async function preventWritingThroughSymlink(
   dest: string,
@@ -110,7 +127,7 @@ export async function preventWritingThroughSymlink(
 ): Promise<void> {
   const rel = nodePath.relative(realOutputPath, dest);
   if (rel === '' || rel === '.') return; // dest === realOutputPath
-  if (rel.startsWith('..') || nodePath.isAbsolute(rel)) {
+  if (isParentEscape(rel) || nodePath.isAbsolute(rel)) {
     throw new LinkThroughSymlinkError(`dest outside output: ${dest}`);
   }
 
@@ -133,40 +150,62 @@ export async function preventWritingThroughSymlink(
   }
 }
 
+/**
+ * True when `rel` (a path.relative result) actually escapes upward: exactly
+ * '..' or a '../...' prefix. Names like '..foo' are legal siblings, not
+ * traversal, and must not be treated as escapes.
+ */
+function isParentEscape(rel: string): boolean {
+  return rel === '..' || rel.startsWith(`..${nodePath.sep}`);
+}
+
+/**
+ * Ensure every ancestor directory of `parent` exists inside the staging root
+ * and is a real directory (not a symlink).
+ *
+ * The staging root is private (0700, this process). Each directory is therefore
+ * either created by this writer (mkdir) or, when mkdir reports EEXIST, is a
+ * prior artifact of this extraction and is verified once with lstat. Verified
+ * directories are cached in `ctx.createdDirs`; re-touching a cached directory
+ * costs no syscalls.
+ */
 async function ensureParentInside(parent: string, ctx: WriteContext): Promise<void> {
   const rel = nodePath.relative(ctx.realOutputPath, parent);
   if (rel === '' || rel === '.') return;
-  if (rel.startsWith('..') || nodePath.isAbsolute(rel)) {
+  if (isParentEscape(rel) || nodePath.isAbsolute(rel)) {
     throw new NotADirectoryError(`parent escapes output: ${parent}`);
   }
 
   let cur = ctx.realOutputPath;
   const segments = rel.split(nodePath.sep).filter(Boolean);
   for (const seg of segments) {
-    cur = nodePath.join(cur, seg);
-    if (ctx.createdDirs.has(cur)) continue;
-
-    await preventWritingThroughSymlink(cur, ctx.realOutputPath, ctx.signal);
+    const next = nodePath.join(cur, seg);
+    if (ctx.createdDirs.has(next)) {
+      cur = next;
+      continue;
+    }
 
     try {
-      await safeMkdir(cur, { mode: 0o755 & ~ctx.umask, signal: ctx.signal });
-      ctx.createdDirs.add(cur);
+      await safeMkdir(next, { mode: 0o755 & ~ctx.umask, signal: ctx.signal });
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
-      if (err.code === 'EEXIST') {
-        const st = await safeLstat(cur, ctx.signal);
-        if (st.isSymbolicLink()) throw new LinkThroughSymlinkError(`symlink in path: ${cur}`);
-        if (!st.isDirectory()) throw new NotADirectoryError(`not a directory: ${cur}`);
-        ctx.createdDirs.add(cur); // pre-existing dir; accept
-      } else {
-        throw e;
-      }
+      if (err.code !== 'EEXIST') throw e;
+      // Something already exists at this path. Since the staging root is
+      // private, it can only be a prior artifact of this extraction; a
+      // symlink here means an archive entry is trying to plant a traversal
+      // path (for example a symlink entry followed by a file write through it).
+      const st = await safeLstat(next, ctx.signal);
+      if (st.isSymbolicLink()) throw new LinkThroughSymlinkError(`symlink in path: ${next}`);
+      if (!st.isDirectory()) throw new NotADirectoryError(`not a directory: ${next}`);
     }
 
-    // Recheck containment after creation.
-    if (!isInsideOutput(cur, ctx.realOutputPath)) {
-      throw new NotADirectoryError(`path escaped output after mkdir: ${cur}`);
+    // Recheck containment after creation (defense in depth, once per directory).
+    if (!isInsideOutput(next, ctx.realOutputPath)) {
+      throw new NotADirectoryError(`path escaped output after mkdir: ${next}`);
     }
+
+    ctx.createdDirs.add(next);
+    cur = next;
   }
 }
 
@@ -176,8 +215,6 @@ async function writeDirectory(
   ctx: WriteContext,
 ): Promise<EntryResult> {
   await ensureParentInside(nodePath.dirname(dest), ctx);
-  // Directory creation uses the same symlink-ancestor checks as file writes.
-  await preventWritingThroughSymlink(dest, ctx.realOutputPath, ctx.signal);
 
   const mode = sanitizeMode(entry.mode, 'directory', {
     preservePermissions: ctx.policy.preservePermissions,
@@ -204,7 +241,7 @@ async function writeDirectory(
     }
   }
 
-  return { kind: 'directory', path: dest, mode };
+  return { kind: 'directory', path: dest, mode, mtime: entry.mtime ?? null };
 }
 
 async function writeFileEntry(
@@ -212,18 +249,21 @@ async function writeFileEntry(
   dest: string,
   ctx: WriteContext,
 ): Promise<EntryResult> {
-  // prevent writing through a symlink
-  await preventWritingThroughSymlink(dest, ctx.realOutputPath, ctx.signal);
+  // Claim the body stream before the first await. The TAR parser auto-drains
+  // unclaimed bodies when the pipeline advances past an entry; concurrent
+  // writers must therefore claim synchronously on receipt so the drain only
+  // ever applies to entries the pipeline actually skipped.
+  const contents = entry.buffer ? [await entry.buffer()] : entry.stream ? entry.stream() : [];
 
-  const parent = nodePath.dirname(dest);
-  await ensureParentInside(parent, ctx);
+  await ensureParentInside(nodePath.dirname(dest), ctx);
 
   const mode = sanitizeMode(entry.mode, 'file', {
     preservePermissions: ctx.policy.preservePermissions,
     umask: ctx.umask,
   });
 
-  // exclusive creation with O_NOFOLLOW (refuses to follow a final-component symlink).
+  // Exclusive creation with O_NOFOLLOW (refuses to follow a final-component
+  // symlink) and O_EXCL (refuses to clobber an existing path).
   let fh;
   try {
     fh = await safeOpenExclusive(dest, 0o600, ctx.signal);
@@ -246,7 +286,6 @@ async function writeFileEntry(
 
   let bytes = 0;
   try {
-    const contents = entry.buffer ? [await entry.buffer()] : entry.stream ? entry.stream() : [];
     for await (const value of contents) {
       if (ctx.signal?.aborted) throw new AbortError(ctx.signal.reason);
       const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value as unknown as Uint8Array);
@@ -259,9 +298,9 @@ async function writeFileEntry(
     await safeClose(fh);
   }
 
-  await applyMtime(dest, entry.mtime ?? null, 'file', ctx.signal);
-
-  return { kind: 'file', path: dest, mode, bytes };
+  // mtime is applied by the caller in a post-write batch; the staging tree is
+  // invisible until the atomic rename, so deferral is externally unobservable.
+  return { kind: 'file', path: dest, mode, bytes, mtime: entry.mtime ?? null };
 }
 
 async function writeSymlink(
@@ -278,9 +317,6 @@ async function writeSymlink(
     allowHardlinks: ctx.policy.allowHardlinks,
     realOutputPath: ctx.realOutputPath,
   });
-
-  // don't write the symlink itself through a planted symlink at dest.
-  await preventWritingThroughSymlink(dest, ctx.realOutputPath, ctx.signal);
 
   try {
     await safeSymlink(linkname, dest, ctx.signal);
@@ -310,7 +346,7 @@ async function writeSymlink(
           code: 'symlink_fallback_skip',
           message: `symlink skipped: ${entry.path}`,
         });
-        return { kind: 'symlink', path: dest, target: linkname };
+        return { kind: 'symlink', path: dest, target: linkname, mtime: entry.mtime ?? null };
       } else {
         throw e;
       }
@@ -319,10 +355,7 @@ async function writeSymlink(
     }
   }
 
-  // mtime on symlinks via lutimes (skipped on Windows inside applyMtime).
-  await applyMtime(dest, entry.mtime ?? null, 'symlink', ctx.signal);
-
-  return { kind: 'symlink', path: dest, target: linkname };
+  return { kind: 'symlink', path: dest, target: linkname, mtime: entry.mtime ?? null };
 }
 
 async function writeHardlink(
@@ -338,9 +371,6 @@ async function writeHardlink(
     allowHardlinks: true, // already checked above
     realOutputPath: ctx.realOutputPath,
   });
-
-  // prevent writing through a symlink
-  await preventWritingThroughSymlink(dest, ctx.realOutputPath, ctx.signal);
 
   try {
     await safeHardlink(target, dest, ctx.signal);
@@ -361,8 +391,6 @@ async function writeHardlink(
   }
 
   // Do not update hardlink times because links share the target inode.
-  // applyMtime is a no-op for hardlinks.
-
   return { kind: 'hardlink', path: dest, target };
 }
 

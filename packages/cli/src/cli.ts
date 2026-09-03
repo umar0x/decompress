@@ -29,6 +29,7 @@ Options:
   --max-archive-size <size>   Max input archive size (default: 512mb)
   --max-depth <n>             Max path depth (default: 128)
   --max-compression-ratio <n> Max compression ratio (default: 100)
+  --concurrency <n>           Max entries written in parallel (default: 8)
   --pretty                    Pretty-print JSON output (list/audit)
   --help, -h                  Show this help
   --version, -v               Show version
@@ -53,6 +54,7 @@ function parseCliArgs(argv: string[]) {
       'max-archive-size': { type: 'string' },
       'max-depth': { type: 'string' },
       'max-compression-ratio': { type: 'string' },
+      concurrency: { type: 'string' },
       pretty: { type: 'boolean' },
       help: { type: 'boolean', short: 'h' },
       version: { type: 'boolean', short: 'v' },
@@ -84,6 +86,7 @@ function buildExtractOpts(values: Record<string, unknown>): ExtractOptions {
   if (values['max-archive-size'] !== undefined)
     opts.maxArchiveSize = toSize(values['max-archive-size'] as string)!;
   if (values['max-depth'] !== undefined) opts.maxDepth = toNumber(values['max-depth'] as string)!;
+  if (values.concurrency !== undefined) opts.concurrency = toNumber(values.concurrency as string)!;
   if (values['max-compression-ratio'] !== undefined)
     opts.maxCompressionRatio = toNumber(values['max-compression-ratio'] as string)!;
   return opts;

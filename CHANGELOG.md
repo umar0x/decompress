@@ -3,67 +3,86 @@
 All notable changes are documented here. The project follows Keep a Changelog and Semantic
 Versioning.
 
-## [1.0.0] - 2026-07-23
+## [1.0.2] - 2026-09-03
 
-First stable release. The native structured API is the recommended product surface and
-`@umar0x/decompress-compatible` remains a bounded migration bridge. The major bump reflects a
-deliberate contract and runtime policy change, not a rewrite.
+First stable public release. The native structured API is the recommended product surface and
+`@umar0x/decompress-compatible` remains a bounded migration bridge.
 
-### Breaking changes
+Note on version numbers: 1.0.0 and 1.0.1 were published on 2026-07-11 during initial bring-up and
+superseded the same day by 0.0.1, the intended baseline. The npm registry does not allow
+republishing those slots, so the first stable release is 1.0.2.
 
-- Node support floor raised to Node 22. Node 20 is end of life and is no longer tested or
-  supported. CI runs Node 22, 24, and 26 across Linux, macOS, and Windows.
-- Malformed plugin records fail closed in all three public APIs. `extract`, `listArchive`, and
-  `auditArchive` share one structural validator that runs before any API specific work. A plugin
-  that emits a record like `{ path: 42, type: 'file' }` now produces a typed
-  `PluginInvalidEntryError` instead of returning a non-string path or crashing with a raw
-  `TypeError`.
-- Audit numeric fields are always finite safe integers. `totalSize`, `compressionRatio`, and
-  `entryCount` are guarded against `Infinity` and `NaN` so JSON serialization cannot produce
-  `null`. Overflow produces a typed critical finding (`total_size_overflow`) instead.
-- Raw archive paths are validated before `strip`. Previously strip ran first; now the raw archive
-  path is validated, then stripped, then revalidated after `map`. This makes the security claim
-  that raw archive paths are rejected literally true and rejects archives that hide traversal
-  behind stripped components.
-- Removed `PluginCalledFsError` and `UnicodeCollisionError`. The former could not be enforced in
-  normal Node JavaScript; the latter was never thrown. The corresponding error codes
-  (`PLUGIN_FS_ACCESS`, `UNICODE_COLLISION`) are removed from `ErrorCode`.
-- Compatibility adapter caps in memory content at 256 MiB by default. A new `maxInMemorySize`
-  option bounds the buffered bytes cost of the legacy `data`, `filter`, and `map` callbacks.
-  Exceeding it fails closed with `LimitExceededError` and removes the adapter temporary state.
+### Performance
 
-### Added
+- ZIP file writes are scheduled through a bounded worker pool. The new `concurrency` option
+  (1 to 32, default 8) controls it. TAR-family formats stay sequential because their entry
+  bodies are ordered streams. Policy validation still runs on every entry before any write
+  begins, and the atomic commit is unchanged.
+- Per-file lstat ancestor walks were removed in favor of a cached directory authority plus
+  kernel-level O_NOFOLLOW and O_EXCL enforcement. On a 5,000-file ZIP this cut the writer's
+  lstat count from 10,052 to 2.
+- File and symlink mtimes are applied in bounded parallel batches after content lands, inside
+  the private staging tree, so the deferral is not observable before the atomic rename.
+- Measured effect on the benchmark corpus (5-run medians, warm): small archives 47 to 72
+  percent faster, 60-level deep nesting 80 percent faster, 5,000-file archives 6 to 18 percent
+  faster, 8-way concurrent extraction 16 percent faster. Peak RSS is unchanged and stays 10 to
+  25 times below the buffered competitors on large single files.
 
-- `validateArchiveEntry` and `selectPlugins` are now exported as part of the public API so callers
-  building higher level extraction tooling can pre validate custom plugin output with the same
-  boundary the library uses.
-- `PluginInvalidEntryError` now carries `pluginName` and `entryIndex` for precise diagnostics.
-- Audit captures parser warnings as low severity findings instead of silently discarding them.
-- A dedicated plugin record contract regression suite and a CI job that runs it as a required
-  check.
-- Benchmark harness now covers zip, tar, and tar.gz across three sizes with peak RSS measurement
-  and machine readable JSON output.
-- POSIX symlink capability is asserted on the Linux CI runner so link tests cannot silently skip.
+### Compatibility
+
+- Archives containing `./`-prefixed or interior `/./` path segments, the shape produced by
+  `tar czf archive.tgz .`, now extract instead of being rejected. Dot segments are stripped
+  before validation because they are semantically neutral. Parent traversal, absolute, drive,
+  UNC, NTFS ADS, device-name, and duplicate-path rejection behavior is unchanged and covered by
+  regression tests.
+- File and directory names that merely start with dots (`..foo`) are no longer misjudged as
+  parent traversal during ancestor checks.
+
+### Fixed
+
+- A race between the TAR parser's body auto-drain and concurrent writers could produce empty
+  files. Writers now claim entry body streams synchronously on receipt. Regression tests
+  compare full output trees across concurrency levels.
+- The ZIP archive handle could close before a lazily opened entry stream was read. Parser-owned
+  handles now close through a pipeline teardown hook that runs after extraction finishes.
+- Hardlink overwrite handling and the `..foo` ancestor check described above.
+
+### Dependencies
+
+- Runtime: yauzl ^3.4.0, tar-stream ^3.2.0, unbzip2-stream ^1.4.3.
+- Development tree updated to eslint 10.9, typescript-eslint 8.69, @changesets/cli 3, tsx 4.23,
+  @types/node 26.4. TypeScript stays on 5.9: the 7.0 line is the native compiler build without
+  the JavaScript API that typescript-eslint requires.
+- tar-stream 3.2.1 is pinned out of this repository's dev install (root override to 3.2.0)
+  because it ships a malformed index.d.ts. Consumers are unaffected; runtime compatibility
+  with 3.2.1 is fine.
+- `npm audit` is clean (was 3 high findings in the dev tree: brace-expansion and js-yaml
+  chains).
+
+### Packaging
+
+- Source maps are no longer published. The package tarball dropped from 133 KB to 51 KB and the
+  unpacked size from 598 KB to about 250 KB.
+
+### Testing and quality
+
+- 299 tests (was 278): new concurrency suite (output tree identity across concurrency levels,
+  ordered callbacks, atomic failure, mtime correctness), dot-segment compatibility suite, and
+  legacy adapter unit tests.
+- Coverage 92.5 percent lines, 84.5 percent branches, 96.6 percent functions (was 89.0, 84.5,
+  94.3). secure-writer.ts coverage rose from 70.2 to 87.3 percent lines, the legacy adapter
+  from 31.8 to 97.6 percent.
+- Per-critical-file coverage floors are now enforced from lcov output by
+  `scripts/check-coverage-floors.mjs` during `npm run coverage`.
+- CLI gained `--concurrency`.
 
 ### Security
 
-- `listArchive` no longer returns structurally invalid plugin records as typed entries.
-- `auditArchive` no longer crashes on malformed plugin records and never emits non finite numeric
-  report fields.
-- Plugin selection is centralized; `detect` is invoked at most once per plugin.
-- Documentation now accurately describes the `${dest}.old.${uuid}` backup naming and the
-  `.decompress-tmp-*` staging directory prefix.
-- Audit loop checks `signal.aborted` inside the parse loop, not only at entry.
-
-### Changed
-
-- `extract`, `listArchive`, and `auditArchive` share `selectPlugins`, `validateArchiveEntry`, and
-  `resolveLimits` to eliminate semantic drift across the three public APIs.
-- Audit numeric fields are always finite safe integers, with overflow producing a typed critical
-  finding instead of `Infinity` or `NaN`.
-- The CI matrix moved from `20, 22, 24` to `22, 24, 26`; release readiness pins Node 24 and adds
-  `npm audit signatures` and a symlink capability assertion.
-- `docs/architecture.md`, `README.md`, and `MIGRATION.md` updated to match the 1.0.0 contract.
+- No behavior was relaxed for speed. The full adversarial regression matrix (61 crafted and
+  repository fixtures including path traversal, symlink chains, hardlink escapes, zip bombs,
+  encrypted and malformed archives) passes with zero escapes, zero partial outputs, and zero
+  crashes, both before and after the performance work. Opt-in symlink and hardlink extraction
+  remains containment-checked.
 
 ## [0.0.1] - 2026-07-11
 
@@ -91,10 +110,3 @@ deliberate contract and runtime policy change, not a rewrite.
 - Uses private staging, symlink-ancestor checks, no-follow/exclusive file creation, complete
   partial-write loops, and cleanup on handled failure/abort.
 - Enforces declared-size checks and rolling actual-byte checks while streaming bodies.
-
-### Changed
-
-- The native structured API is the recommended product surface.
-- `@umar0x/decompress-compatible` is documented as a transitional adapter rather than universal
-  behavioral parity; its content-buffering and replay cost is explicit.
-- Runtime dependencies reduced to `yauzl`, `tar-stream`, and `unbzip2-stream`.

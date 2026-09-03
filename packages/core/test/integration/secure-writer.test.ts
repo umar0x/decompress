@@ -540,3 +540,113 @@ test('cleanupTempDir: refuses to delete non-temp paths (safety guard)', async ()
     await rm(out, { recursive: true, force: true });
   }
 });
+
+test('writeEntry: overwrite policy replaces existing files, symlinks, and hardlinks', async () => {
+  const out = await makeTempDir();
+  const output = nodePath.join(out, 'result');
+  await mkdir(output, { recursive: true });
+  const ctx = {
+    realOutputPath: output,
+    umask: 0o022,
+    limits: DEFAULT_LIMITS,
+    policy: defaultPolicy(),
+    createdDirs: new Set([output]),
+    warnings: [],
+    pathCtx: { platform: 'posix' as const, caseInsensitive: false, limits: DEFAULT_LIMITS },
+  };
+
+  try {
+    // File overwrite: existing file is replaced.
+    await writeFile(nodePath.join(output, 'file.txt'), Buffer.from('OLD'));
+    const r1 = await writeEntry(
+      makeEntry({ path: 'file.txt', buffer: async () => Buffer.from('NEW') }),
+      { ...ctx, policy: { ...ctx.policy, overwrite: true } },
+    );
+    assert.equal(r1.kind, 'file');
+    assert.equal(await readFile(nodePath.join(output, 'file.txt'), 'utf8'), 'NEW');
+
+    // Directory overwrite: existing directory is accepted.
+    await mkdir(nodePath.join(output, 'existing-dir'));
+    const r2 = await writeEntry(makeEntry({ path: 'existing-dir', type: 'directory' }), {
+      ...ctx,
+      policy: { ...ctx.policy, overwrite: true },
+    });
+    assert.equal(r2.kind, 'directory');
+
+    // Symlink overwrite: existing symlink is replaced.
+    await symlink('somewhere', nodePath.join(output, 'link'));
+    const r3 = await writeEntry(
+      makeEntry({ path: 'link', type: 'symlink', linkTarget: 'file.txt' }),
+      { ...ctx, policy: { ...ctx.policy, overwrite: true, allowSymlinks: true } },
+    );
+    assert.equal(r3.kind, 'symlink');
+    assert.equal(await readFile(nodePath.join(output, 'link'), 'utf8'), 'NEW');
+
+    // Hardlink overwrite: existing path is unlinked and the hardlink lands.
+    await writeFile(nodePath.join(output, 'hl'), Buffer.from('TO-BE-REPLACED'));
+    const r4 = await writeEntry(
+      makeEntry({ path: 'hl', type: 'hardlink', linkTarget: 'file.txt' }),
+      { ...ctx, policy: { ...ctx.policy, overwrite: true, allowHardlinks: true } },
+    );
+    assert.equal(r4.kind, 'hardlink');
+    assert.equal(await readFile(nodePath.join(output, 'hl'), 'utf8'), 'NEW');
+  } finally {
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test('writeEntry: pre-existing parent directories that are not symlinks are accepted', async () => {
+  const out = await makeTempDir();
+  const output = nodePath.join(out, 'result');
+  await mkdir(nodePath.join(output, 'nested', 'deep'), { recursive: true });
+  try {
+    const ctx = {
+      realOutputPath: output,
+      umask: 0o022,
+      limits: DEFAULT_LIMITS,
+      policy: defaultPolicy(),
+      createdDirs: new Set([output]),
+      warnings: [],
+      pathCtx: { platform: 'posix' as const, caseInsensitive: false, limits: DEFAULT_LIMITS },
+    };
+    const r = await writeEntry(
+      makeEntry({ path: 'nested/deep/file.txt', buffer: async () => Buffer.from('X') }),
+      ctx,
+    );
+    assert.equal(r.kind, 'file');
+    assert.equal((r as { bytes: number }).bytes, 1);
+    // The EEXIST verification path cached the pre-existing directories.
+    assert.ok(ctx.createdDirs.has(nodePath.join(output, 'nested')));
+    assert.ok(ctx.createdDirs.has(nodePath.join(output, 'nested', 'deep')));
+  } finally {
+    await rm(out, { recursive: true, force: true });
+  }
+});
+
+test('writeEntry: a symlink planted as an ancestor is rejected on first touch', async () => {
+  const out = await makeTempDir();
+  const output = nodePath.join(out, 'result');
+  await mkdir(output, { recursive: true });
+  const ctx = {
+    realOutputPath: output,
+    umask: 0o022,
+    limits: DEFAULT_LIMITS,
+    policy: { ...defaultPolicy(), allowSymlinks: true },
+    createdDirs: new Set([output]),
+    warnings: [],
+    pathCtx: { platform: 'posix' as const, caseInsensitive: false, limits: DEFAULT_LIMITS },
+  };
+  try {
+    // Simulate an earlier extraction step that planted a symlink directory.
+    await symlink('/etc', nodePath.join(output, 'trap'));
+    await assert.rejects(
+      writeEntry(
+        makeEntry({ path: 'trap/passwd-copy', buffer: async () => Buffer.from('X') }),
+        ctx,
+      ),
+      LinkThroughSymlinkError,
+    );
+  } finally {
+    await rm(out, { recursive: true, force: true });
+  }
+});

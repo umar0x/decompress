@@ -51,6 +51,10 @@ test('extract: file.tar → extracted', async () => {
     const result = await extract(nodePath.join(fixtures, 'file.tar'), target);
     assert.ok(result.entries.length >= 1);
     assert.equal(result.detectedFormats[0], 'tar');
+    // Content check guards against silent body-drain races (empty files).
+    const data = await readFile(nodePath.join(target, 'test.jpg'));
+    assert.ok(data.length > 0, 'extracted tar file must not be empty');
+    assert.equal(data.length, result.entries[0]?.size);
   } finally {
     await rm(out, { recursive: true, force: true });
   }

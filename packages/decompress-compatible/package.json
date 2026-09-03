@@ -1,6 +1,6 @@
 {
   "name": "@umar0x/decompress-compatible",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Security-first migration adapter for kevva/decompress",
   "license": "MIT",
   "author": "umar0x <hello@umar.ac>",
@@ -50,6 +50,6 @@
     "compatible"
   ],
   "dependencies": {
-    "@umar0x/decompress": "^1.0.0"
+    "@umar0x/decompress": "^1.0.2"
   }
 }

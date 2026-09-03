@@ -60,6 +60,7 @@ export async function auditArchive(
     maxArchiveSize: limits.maxArchiveSize,
     signal,
   });
+  const teardown: Array<() => void> = [];
 
   try {
     let format = detectFormat(resolved.peek);
@@ -98,6 +99,7 @@ export async function auditArchive(
       size: resolved.size,
       hints: [format ?? plugins[0]!.name],
       signal: signal ?? new AbortController().signal,
+      teardown,
     };
 
     const entrySummaries: AuditReport['entries'] = [];
@@ -237,6 +239,13 @@ export async function auditArchive(
       entries: entrySummaries,
     };
   } finally {
+    for (const fn of teardown) {
+      try {
+        fn();
+      } catch {
+        // Teardown must not mask the primary outcome.
+      }
+    }
     await resolved.cleanup();
   }
 }

@@ -56,7 +56,8 @@ are not independently changed because linked names share an inode.
 
 ### Partial state
 
-Writes occur in a private sibling staging directory. A successful rename exposes the completed
+Writes (sequential for TAR-family formats, bounded-concurrent for ZIP) occur in a private
+sibling staging directory. A successful rename exposes the completed
 tree. Handled failures and aborts remove staging best-effort. `overwrite: true` uses a backup rename
 and restoration attempt rather than merging trees.
 

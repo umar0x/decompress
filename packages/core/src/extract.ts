@@ -34,6 +34,7 @@ import {
   checkDuplicate,
   detectPlatform,
   normalizePath,
+  stripDotSegments,
   validatePath,
 } from './writer/path-security.ts';
 
@@ -97,6 +98,7 @@ async function doExtract(
     maxArchiveSize: limits.maxArchiveSize,
     signal: opts.signal,
   });
+  const teardown: Array<() => void> = [];
 
   try {
     let format = detectFormat(resolved.peek);
@@ -130,6 +132,7 @@ async function doExtract(
       size: resolved.size,
       hints: [detectedFormat],
       signal: opts.signal ?? new AbortController().signal,
+      teardown,
     };
 
     const platform = detectPlatform();
@@ -185,7 +188,9 @@ async function doExtract(
         // is revalidated after map.
         validatePath(raw.path, pathCtx, raw.path);
 
-        let strippedPath = raw.path;
+        // Dot segments are semantically neutral; the reported path is the
+        // normalized landing path so entry.path matches the disk location.
+        let strippedPath = stripDotSegments(raw.path);
         if ((opts.strip ?? 0) > 0) {
           strippedPath = stripSegments(strippedPath, opts.strip!);
           if (strippedPath === '') {
@@ -288,6 +293,7 @@ async function doExtract(
       limits,
       policy,
       signal: opts.signal,
+      concurrency: opts.concurrency,
       perEntryOverwrite: overwriteEntryIndices,
       onEntry: (written, index) => opts.onEntry?.(toEntry(written, metadata[index]!)),
       onWarning: (warning) => {
@@ -313,6 +319,13 @@ async function doExtract(
       durationMs: Date.now() - startTime,
     };
   } finally {
+    for (const fn of teardown) {
+      try {
+        fn();
+      } catch {
+        // Teardown must not mask the primary outcome.
+      }
+    }
     await resolved.cleanup();
   }
 }
@@ -334,6 +347,7 @@ function validateOptions(opts: ExtractOptions): void {
   validateInteger('strip', opts.strip, 0);
   validateInteger('maxFiles', opts.maxFiles, 0);
   validateInteger('maxDepth', opts.maxDepth, 0);
+  validateInteger('concurrency', opts.concurrency, 1, 32);
   if (
     opts.maxCompressionRatio !== undefined &&
     (!Number.isFinite(opts.maxCompressionRatio) || opts.maxCompressionRatio <= 0)
