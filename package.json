@@ -39,13 +39,13 @@
     "publish:packages": "npm publish --workspace @umar0x/decompress --access public --provenance && sleep 5 && npm publish --workspace @umar0x/decompress-compatible --access public --provenance && sleep 5 && npm publish --workspace @umar0x/decompress-cli --access public --provenance"
   },
   "devDependencies": {
-    "@changesets/cli": "^3.0.1",
+    "@changesets/cli": "^3.0.2",
     "@eslint/js": "^10.0.1",
     "@types/node": "^26.4.1",
     "@types/tar-stream": "^3.1.4",
     "@types/yauzl": "^3.4.0",
     "c8": "^12.0.0",
-    "eslint": "^10.9.1",
+    "eslint": "^10.10.0",
     "prettier": "^3.9.6",
     "tsup": "^8.5.1",
     "tsx": "^4.23.13",
