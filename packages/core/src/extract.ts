@@ -116,7 +116,11 @@ async function doExtract(
       );
     }
     const plugin = plugins[0]!;
-    const detectedFormat = format ?? plugin.name;
+    // The format detector returns the compression-layer magic ('gz', 'bz2')
+    // rather than the archive name. Surface the plugin's name to consumers
+    // so detectedFormats stays consistent across extract, listArchive, and
+    // auditArchive and matches what the parser reports as sourceFormat.
+    const detectedFormat = plugin.name;
     const warnings: Warning[] = [];
     const emitWarning = (warning: Warning) => {
       warnings.push(warning);

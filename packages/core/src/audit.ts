@@ -97,7 +97,7 @@ export async function auditArchive(
       buffer: resolved.buffer,
       filePath: resolved.filePath,
       size: resolved.size,
-      hints: [format ?? plugins[0]!.name],
+      hints: [plugins[0]!.name],
       signal: signal ?? new AbortController().signal,
       teardown,
     };
@@ -231,7 +231,7 @@ export async function auditArchive(
 
     return {
       riskLevel,
-      detectedFormats: [format ?? plugins[0]!.name],
+      detectedFormats: [plugins[0]!.name],
       totalSize: finiteSafeNumber(totalSize),
       compressionRatio,
       entryCount: finiteSafeNumber(entryCount),
