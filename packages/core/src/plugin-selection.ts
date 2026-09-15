@@ -48,6 +48,7 @@ const BUILTIN_FORMAT_MAP: Readonly<Record<string, string>> = Object.freeze({
   tar: 'tar',
   gz: 'tar.gz',
   bz2: 'tar.bz2',
+  zst: 'tar.zst',
 });
 
 function resolvePlugin(
