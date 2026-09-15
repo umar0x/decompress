@@ -134,7 +134,7 @@ test('1.0.3 regression: parser warning surfaces through onWarning on all APIs', 
     name: 'warn-probe',
     formats: ['warn-probe'],
     detect: () => true,
-    parse: async function* (input, ctx) {
+    parse: async function* (_input, ctx) {
       ctx.warn('parser_test_warning', 'a parser-emitted warning', { extra: 1 });
       yield { path: 'a.txt', type: 'file', sourceFormat: 'warn-probe', size: 0 };
     },
