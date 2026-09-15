@@ -55,7 +55,7 @@ type signatures changed and no security guarantees were relaxed.
   runtime dependency changes. `npm audit` remains clean.
 - The root override pinning `tar-stream` to 3.2.0 is retained because 3.2.1 still ships a
   malformed `index.d.ts` (the `entry` event tuple is missing its opening bracket: `entry:
-  eader: Header, ...]`). Runtime compatibility with 3.2.1 is unaffected; consumers are
+eader: Header, ...]`). Runtime compatibility with 3.2.1 is unaffected; consumers are
   not constrained by this dev-only override.
 
 ### Testing and quality
@@ -76,20 +76,20 @@ type signatures changed and no security guarantees were relaxed.
 - No perf-critical code paths changed in 1.0.3. The same private benchmark suite was rerun
   on identical hardware (2-vCPU Linux, Node 24.19.0, 5-run medians). Measured before/after:
 
-  | Scenario                       | Format  | Files | 1.0.2 (ms) | 1.0.3 (ms) | Delta  |
-  | ------------------------------ | ------- | ----: | ---------: | ---------: | -----: |
-  | tiny zip (1 × 100 B)           | zip     |     1 |        1.2 |        1.6 | +25.4% |
-  | small zip (10 × 1 KiB)         | zip     |    10 |        2.7 |        3.1 | +14.3% |
-  | medium zip (500 × 4 KiB)        | zip     |   500 |      256.5 |       93.2 | -63.7% |
-  | large zip (5000 × 1 KiB)        | zip     |  5000 |     1246.8 |      905.3 | -27.4% |
-  | large-file zip (1 × 64 MiB)    | zip     |     1 |       49.8 |       52.7 |  +6.0% |
-  | tiny tar (1 × 100 B)            | tar     |     1 |        1.1 |        1.3 | +15.5% |
-  | small tar.gz (50 × 1 KiB)       | tar.gz  |    50 |        7.5 |        8.1 |  +8.0% |
-  | medium tar.gz (500 × 4 KiB)     | tar.gz  |   500 |      213.7 |       84.1 | -60.6% |
-  | large tar.gz (5000 × 1 KiB)      | tar.gz  |  5000 |     1165.6 |      836.1 | -28.3% |
-  | large-file tar.gz (1 × 64 MiB) | tar.gz  |     1 |      196.7 |      202.9 |  +3.2% |
-  | deep-tree tar.gz (depth 40)     | tar.gz  |    40 |       39.8 |       13.3 | -66.5% |
-  | unicode zip (50 × NFD names)    | zip     |    50 |       23.3 |        7.4 | -68.4% |
+  | Scenario                       | Format | Files | 1.0.2 (ms) | 1.0.3 (ms) |  Delta |
+  | ------------------------------ | ------ | ----: | ---------: | ---------: | -----: |
+  | tiny zip (1 × 100 B)           | zip    |     1 |        1.2 |        1.6 | +25.4% |
+  | small zip (10 × 1 KiB)         | zip    |    10 |        2.7 |        3.1 | +14.3% |
+  | medium zip (500 × 4 KiB)       | zip    |   500 |      256.5 |       93.2 | -63.7% |
+  | large zip (5000 × 1 KiB)       | zip    |  5000 |     1246.8 |      905.3 | -27.4% |
+  | large-file zip (1 × 64 MiB)    | zip    |     1 |       49.8 |       52.7 |  +6.0% |
+  | tiny tar (1 × 100 B)           | tar    |     1 |        1.1 |        1.3 | +15.5% |
+  | small tar.gz (50 × 1 KiB)      | tar.gz |    50 |        7.5 |        8.1 |  +8.0% |
+  | medium tar.gz (500 × 4 KiB)    | tar.gz |   500 |      213.7 |       84.1 | -60.6% |
+  | large tar.gz (5000 × 1 KiB)    | tar.gz |  5000 |     1165.6 |      836.1 | -28.3% |
+  | large-file tar.gz (1 × 64 MiB) | tar.gz |     1 |      196.7 |      202.9 |  +3.2% |
+  | deep-tree tar.gz (depth 40)    | tar.gz |    40 |       39.8 |       13.3 | -66.5% |
+  | unicode zip (50 × NFD names)   | zip    |    50 |       23.3 |        7.4 | -68.4% |
 
   The 2-vCPU runner has 10-30% noise on the small scenarios. No code-level change should
   affect throughput, so the large deltas on medium/large scenarios are dominated by system

@@ -89,8 +89,7 @@ test('limit: maxTotalSize is enforced mid-write and removes staging', async () =
           maxArchiveSize: 1024,
           maxCompressionRatio: 1e9,
         }),
-      (e: unknown) =>
-        isDecompressError(e) && (e as { code: string }).code === 'LIMIT_TOTAL_SIZE',
+      (e: unknown) => isDecompressError(e) && (e as { code: string }).code === 'LIMIT_TOTAL_SIZE',
     );
     await assertOutputAbsent(target);
     await assertNoStaging(out);
@@ -111,8 +110,7 @@ test('limit: maxEntrySize is enforced per entry and removes staging', async () =
           maxArchiveSize: 1024,
           maxCompressionRatio: 1e9,
         }),
-      (e: unknown) =>
-        isDecompressError(e) && (e as { code: string }).code === 'LIMIT_ENTRY_SIZE',
+      (e: unknown) => isDecompressError(e) && (e as { code: string }).code === 'LIMIT_ENTRY_SIZE',
     );
     await assertOutputAbsent(target);
     await assertNoStaging(out);
@@ -134,8 +132,7 @@ test('limit: maxCompressionRatio is enforced and removes staging', async () => {
           maxCompressionRatio: 10,
         }),
       (e: unknown) =>
-        isDecompressError(e) &&
-        (e as { code: string }).code === 'LIMIT_COMPRESSION_RATIO',
+        isDecompressError(e) && (e as { code: string }).code === 'LIMIT_COMPRESSION_RATIO',
     );
     await assertOutputAbsent(target);
     await assertNoStaging(out);

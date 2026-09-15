@@ -118,7 +118,10 @@ test('tar.zst: corrupted zstd bytes produce a typed corruption error', async () 
   const out = await mkdtemp(nodePath.join(tmpdir(), 'decompress-tarzst-'));
   try {
     // Valid magic but garbage after.
-    const corrupted = Buffer.concat([Buffer.from([0x28, 0xb5, 0x2f, 0xfd]), Buffer.alloc(32, 0xff)]);
+    const corrupted = Buffer.concat([
+      Buffer.from([0x28, 0xb5, 0x2f, 0xfd]),
+      Buffer.alloc(32, 0xff),
+    ]);
     await assert.rejects(
       () => extract(corrupted, nodePath.join(out, 'r'), { maxArchiveSize: corrupted.length + 1 }),
       (e: unknown) => {

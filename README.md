@@ -157,12 +157,12 @@ price this library pays for atomic staging and per-entry policy validation.
 
 ## Formats and dependencies
 
-| Format  | Detection       | Parser                          |
-| ------- | --------------- | ------------------------------- |
-| ZIP     | `PK` signatures | `yauzl`                         |
-| TAR     | `ustar` header  | `tar-stream`                    |
-| TAR.GZ  | gzip signature  | `node:zlib` + `tar-stream`      |
-| TAR.BZ2 | `BZh` signature | `unbzip2-stream` + `tar-stream` |
+| Format  | Detection                   | Parser                                              |
+| ------- | --------------------------- | --------------------------------------------------- |
+| ZIP     | `PK` signatures             | `yauzl`                                             |
+| TAR     | `ustar` header              | `tar-stream`                                        |
+| TAR.GZ  | gzip signature              | `node:zlib` + `tar-stream`                          |
+| TAR.BZ2 | `BZh` signature             | `unbzip2-stream` + `tar-stream`                     |
 | TAR.ZST | Zstd frame magic (RFC 8478) | `node:zlib` (`createZstdDecompress`) + `tar-stream` |
 
 Runtime dependencies: `yauzl`, `tar-stream`, and `unbzip2-stream`. TAR.ZST relies on

@@ -202,7 +202,10 @@ test('1.0.3 regression: cleanup leaves no staging directories after a limit viol
       (e: unknown) => isDecompressError(e),
     );
     // Output absent
-    await assert.rejects(() => stat(target), (e: NodeJS.ErrnoException) => e.code === 'ENOENT');
+    await assert.rejects(
+      () => stat(target),
+      (e: NodeJS.ErrnoException) => e.code === 'ENOENT',
+    );
     // No staging directories left in parent
     const siblings = await readdir(out);
     const staging = siblings.filter((s) => s.startsWith('.decompress-tmp-'));
