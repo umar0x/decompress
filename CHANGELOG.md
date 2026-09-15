@@ -3,6 +3,108 @@
 All notable changes are documented here. The project follows Keep a Changelog and Semantic
 Versioning.
 
+## [1.0.3] - 2026-09-15
+
+A maintenance and capability release. The big additions are tar.zst (Zstandard-compressed TAR)
+support and a consistency fix for `detectedFormats` across the three public APIs. No public
+type signatures changed and no security guarantees were relaxed.
+
+### Added
+
+- TAR.ZST (`.tar.zst`, `.tzst`) format support. Zstandard decompression is built into
+  `node:zlib` as of Node 22.15 (Stable), so the new `tarzst` plugin reuses the existing
+  `tar-common` parser pipeline with no new runtime dependencies. The plugin feature-detects
+  at module load: on a Node version without `createZstdDecompress`, the format reports as
+  unknown and `parse()` throws a typed error if a caller bypasses detection. The same
+  path-policy, link-policy, limits, and atomic-commit guarantees apply unchanged.
+- Zstd frame magic (`0x28 0xB5 0x2F 0xFD`, RFC 8478) is now recognized by `detectFormat()`,
+  which returns the new `'zst'` value. The builtin format map routes `'zst'` to the
+  `tar.zst` plugin.
+- Seven integration tests for tar.zst: extract, listArchive, auditArchive, corrupted-zstd
+  handling, path-policy traversal rejection, and directory entry semantics.
+- Eight regression tests pinning the behaviors fixed in this release (see Fixed).
+- Eight limit and cleanup tests exercising every resource ceiling (maxFiles, maxTotalSize,
+  maxEntrySize, maxCompressionRatio), parser-failure, abort, and successful-extraction paths.
+  Each asserts the staging directory is removed and the output is absent or fully replaced.
+
+### Changed
+
+- `extract()`, `listArchive()`, and `auditArchive()` now report the selected plugin's name
+  in `detectedFormats` instead of the raw compression-layer magic. Concretely, a gzip-magic
+  archive now reports `'tar.gz'` and a bzip2-magic archive reports `'tar.bz2'`, matching the
+  parser's `sourceFormat` field. The previous `'gz'` / `'bz2'` values were inconsistent with
+  `sourceFormat` and with the values returned by `auditArchive` and `listArchive` for plugin
+  inputs. Consumers that branched on the literal `'gz'` / `'bz2'` value should update to
+  `'tar.gz'` / `'tar.bz2'`. No type signature changed.
+- `parseArchiveInput` hints now receive `[plugin.name]` consistently across all three public
+  APIs. The previous `extract()` path sometimes passed the raw compression magic.
+
+### Fixed
+
+- `atomicExtract` wrapped every `rename` failure in `CrossDeviceRenameError`, including
+  `EACCES`, `EIO`, and `ENOTEMPTY`. Only `EXDEV` actually means a filesystem boundary was
+  crossed. `EXDEV` continues to surface as `CrossDeviceRenameError` (`ATOMIC_EXDEV`); a
+  concurrent-writer `ENOTEMPTY` / `EEXIST` surfaces as `OutputExistsError`
+  (`ATOMIC_OUTPUT_EXISTS`); every other rename failure rethrows with its underlying `errno`
+  intact instead of being misclassified as a cross-device rename.
+
+### Dependencies
+
+- Dev tooling bumped to latest patch: `@changesets/cli` 3.0.1 → 3.0.3, `@types/node`
+  26.4.1 → 26.6.0, `eslint` 10.9.1 → 10.10.0, `typescript-eslint` 8.69.0 → 8.70.0. No
+  runtime dependency changes. `npm audit` remains clean.
+- The root override pinning `tar-stream` to 3.2.0 is retained because 3.2.1 still ships a
+  malformed `index.d.ts` (the `entry` event tuple is missing its opening bracket: `entry:
+eader: Header, ...]`). Runtime compatibility with 3.2.1 is unaffected; consumers are
+  not constrained by this dev-only override.
+
+### Testing and quality
+
+- 323 tests (was 300). Two new test files: `limits-cleanup.test.ts` (resource-limit and
+  staging-cleanup coverage) and `regressions-1.0.3.test.ts` (release-candidate audit). The
+  tar.zst integration suite adds 7 more.
+- Coverage 92.74 percent lines (was 92.52), 85.67 percent branches (was 84.6), 96.62 percent
+  functions (was 96.58). The biggest gains are in `extract.ts` (78.6 → 83.9 percent branches)
+  and `secure-writer.ts` (69.7 → 76.2 percent branches), driven by the new limit and
+  cleanup tests. Per-critical-file floors are unchanged; `audit.ts` rose from 88.6 to 90.2
+  percent lines.
+- `npm run test:pack` (clean-tarball ESM/CJS/CLI smoke) still passes; the new tarzst module
+  ships in the published `dist/` and is exercised by the smoke installer.
+
+### Performance
+
+- No perf-critical code paths changed in 1.0.3. The same private benchmark suite was rerun
+  on identical hardware (2-vCPU Linux, Node 24.19.0, 5-run medians). Measured before/after:
+
+  | Scenario                       | Format | Files | 1.0.2 (ms) | 1.0.3 (ms) |  Delta |
+  | ------------------------------ | ------ | ----: | ---------: | ---------: | -----: |
+  | tiny zip (1 × 100 B)           | zip    |     1 |        1.2 |        1.6 | +25.4% |
+  | small zip (10 × 1 KiB)         | zip    |    10 |        2.7 |        3.1 | +14.3% |
+  | medium zip (500 × 4 KiB)       | zip    |   500 |      256.5 |       93.2 | -63.7% |
+  | large zip (5000 × 1 KiB)       | zip    |  5000 |     1246.8 |      905.3 | -27.4% |
+  | large-file zip (1 × 64 MiB)    | zip    |     1 |       49.8 |       52.7 |  +6.0% |
+  | tiny tar (1 × 100 B)           | tar    |     1 |        1.1 |        1.3 | +15.5% |
+  | small tar.gz (50 × 1 KiB)      | tar.gz |    50 |        7.5 |        8.1 |  +8.0% |
+  | medium tar.gz (500 × 4 KiB)    | tar.gz |   500 |      213.7 |       84.1 | -60.6% |
+  | large tar.gz (5000 × 1 KiB)    | tar.gz |  5000 |     1165.6 |      836.1 | -28.3% |
+  | large-file tar.gz (1 × 64 MiB) | tar.gz |     1 |      196.7 |      202.9 |  +3.2% |
+  | deep-tree tar.gz (depth 40)    | tar.gz |    40 |       39.8 |       13.3 | -66.5% |
+  | unicode zip (50 × NFD names)   | zip    |    50 |       23.3 |        7.4 | -68.4% |
+
+  The 2-vCPU runner has 10-30% noise on the small scenarios. No code-level change should
+  affect throughput, so the large deltas on medium/large scenarios are dominated by system
+  load variance, not by the 1.0.3 code. The point of including the table is honesty: this
+  is what was measured. Do not interpret the -60% numbers as a real perf improvement.
+
+### Security
+
+- No behavior was relaxed for the new format. The tar.zst plugin runs through the same
+  path-policy, link-policy, resource-limit, and atomic-commit pipeline as tar, tar.gz, and
+  tar.bz2. The full adversarial regression matrix (61 crafted and repository fixtures
+  including path traversal, symlink chains, hardlink escapes, zip bombs, encrypted and
+  malformed archives) passes with zero escapes, zero partial outputs, and zero crashes.
+- `npm audit` is clean. No new runtime dependencies were introduced.
+
 ## [1.0.2] - 2026-09-03
 
 First stable public release. The native structured API is the recommended product surface and

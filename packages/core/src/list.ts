@@ -59,7 +59,7 @@ export async function listArchive(input: ArchiveInput, options?: ListOptions): P
       buffer: resolved.buffer,
       filePath: resolved.filePath,
       size: resolved.size,
-      hints: format ? [format] : [plugin.name],
+      hints: [plugin.name],
       signal: opts.signal ?? new AbortController().signal,
       teardown,
     };

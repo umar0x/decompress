@@ -1,7 +1,13 @@
 # @umar0x/decompress
 
-Secure, bounded archive extraction for Node.js 22+. ZIP, TAR, TAR.GZ, and TAR.BZ2, with ESM and
-CommonJS builds.
+[![npm version](https://img.shields.io/npm/v/@umar0x/decompress.svg?style=flat-square)](https://www.npmjs.com/package/@umar0x/decompress)
+[![npm downloads](https://img.shields.io/npm/dm/@umar0x/decompress.svg?style=flat-square)](https://www.npmjs.com/package/@umar0x/decompress)
+[![CI](https://img.shields.io/github/actions/workflow/status/umar0x/decompress/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/umar0x/decompress/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](./LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A522-green.svg?style=flat-square)](https://nodejs.org/en/about/previous-releases)
+
+Secure, bounded archive extraction for Node.js 22+. ZIP, TAR, TAR.GZ, TAR.BZ2, and TAR.ZST,
+with ESM and CommonJS builds.
 
 I built this because the two packages most of the ecosystem still relies on for archive
 extraction are either unmaintained or carry a lineage of extraction vulnerabilities, and I wanted
@@ -151,15 +157,18 @@ price this library pays for atomic staging and per-entry policy validation.
 
 ## Formats and dependencies
 
-| Format  | Detection       | Parser                          |
-| ------- | --------------- | ------------------------------- |
-| ZIP     | `PK` signatures | `yauzl`                         |
-| TAR     | `ustar` header  | `tar-stream`                    |
-| TAR.GZ  | gzip signature  | `node:zlib` + `tar-stream`      |
-| TAR.BZ2 | `BZh` signature | `unbzip2-stream` + `tar-stream` |
+| Format  | Detection                   | Parser                                              |
+| ------- | --------------------------- | --------------------------------------------------- |
+| ZIP     | `PK` signatures             | `yauzl`                                             |
+| TAR     | `ustar` header              | `tar-stream`                                        |
+| TAR.GZ  | gzip signature              | `node:zlib` + `tar-stream`                          |
+| TAR.BZ2 | `BZh` signature             | `unbzip2-stream` + `tar-stream`                     |
+| TAR.ZST | Zstd frame magic (RFC 8478) | `node:zlib` (`createZstdDecompress`) + `tar-stream` |
 
-Runtime dependencies: `yauzl`, `tar-stream`, and `unbzip2-stream`. Encrypted archives, RAR, and
-7z are not supported.
+Runtime dependencies: `yauzl`, `tar-stream`, and `unbzip2-stream`. TAR.ZST relies on
+`node:zlib.createZstdDecompress`, which is Stable as of Node 22.15; on older runtimes the
+format reports as unknown and surfaces a typed runtime error if a caller bypasses detection.
+Encrypted archives, RAR, 7z, and XZ/LZMA are not supported.
 
 ## Development and release readiness
 

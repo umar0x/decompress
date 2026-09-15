@@ -370,13 +370,19 @@ export async function atomicExtract(
     await atomicRename(tempRoot, realOutputPath, opts.policy.overwrite, signal);
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
+    await cleanupTempDir(tempRoot);
     if (err.code === 'EXDEV') {
-      await cleanupTempDir(tempRoot);
       throw new CrossDeviceRenameError('atomic rename crossed a filesystem boundary', { cause: e });
-    } else {
-      await cleanupTempDir(tempRoot);
-      throw new CrossDeviceRenameError(`atomic rename failed: ${err.message}`, { cause: e });
     }
+    if (err.code === 'ENOTEMPTY' || err.code === 'EEXIST') {
+      // Should be unreachable because the pre-check rejects non-empty output,
+      // but a concurrent writer can race us. Surface it under the atomicity
+      // bucket so callers see the right error class.
+      throw new OutputExistsError(`atomic rename target not empty: ${realOutputPath}`);
+    }
+    // Any other rename failure stays a plain Error; wrapping it as
+    // CrossDeviceRenameError would misclassify permission and I/O failures.
+    throw e;
   }
 
   const finalResults = results.filter((r): r is EntryResult => r !== undefined);

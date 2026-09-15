@@ -66,7 +66,10 @@ test('extract: file.tar.gz → extracted', async () => {
   try {
     const result = await extract(nodePath.join(fixtures, 'file.tar.gz'), target);
     assert.ok(result.entries.length >= 1);
-    assert.equal(result.detectedFormats[0], 'gz');
+    // detectedFormat now matches the parser name (tar.gz), not the raw
+    // compression-layer magic ('gz'). This keeps extract, listArchive, and
+    // auditArchive consistent and matches the entry sourceFormat.
+    assert.equal(result.detectedFormats[0], 'tar.gz');
   } finally {
     await rm(out, { recursive: true, force: true });
   }
@@ -78,7 +81,7 @@ test('extract: file.tar.bz2 → extracted', async () => {
   try {
     const result = await extract(nodePath.join(fixtures, 'file.tar.bz2'), target);
     assert.ok(result.entries.length >= 1);
-    assert.equal(result.detectedFormats[0], 'bz2');
+    assert.equal(result.detectedFormats[0], 'tar.bz2');
   } finally {
     await rm(out, { recursive: true, force: true });
   }

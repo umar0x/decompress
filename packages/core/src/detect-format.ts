@@ -1,4 +1,4 @@
-export type DetectedFormat = 'zip' | 'tar' | 'gz' | 'bz2' | null;
+export type DetectedFormat = 'zip' | 'tar' | 'gz' | 'bz2' | 'zst' | null;
 
 /**
  * Detect archive format from the first bytes of the input.
@@ -24,6 +24,11 @@ export function detectFormat(buffer: Buffer): DetectedFormat {
   // BZIP2: BZh at offset 0
   if (buffer[0] === 0x42 && buffer[1] === 0x5a && buffer[2] === 0x68) {
     return 'bz2';
+  }
+
+  // Zstandard frame magic: 0x28 0xB5 0x2F 0xFD (RFC 8478).
+  if (buffer[0] === 0x28 && buffer[1] === 0xb5 && buffer[2] === 0x2f && buffer[3] === 0xfd) {
+    return 'zst';
   }
 
   // TAR: ustar at offset 257

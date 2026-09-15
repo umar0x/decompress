@@ -185,7 +185,7 @@ async function main(argv = process.argv.slice(2)): Promise<number> {
 
 function defaultOutput(archive: string): string {
   // Strip extension: foo.tar.gz → foo, bar.zip → bar
-  const base = archive.replace(/\.(tar\.gz|tar\.bz2|tar|tgz|tbz2|zip)$/i, '');
+  const base = archive.replace(/\.(tar\.gz|tar\.bz2|tar\.zst|tar|tgz|tbz2|tzst|zip)$/i, '');
   return base || 'output';
 }
 
