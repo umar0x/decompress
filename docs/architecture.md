@@ -5,8 +5,8 @@
 ```text
 path / Buffer / Node stream / Web stream / async iterable
   -> bounded input resolver (stream inputs spool to a private temporary file)
-  -> magic-byte detection
-  -> ZIP or TAR-family parser
+  -> magic-byte detection (ZIP, gzip, bzip2, Zstd frame magic, ustar)
+  -> ZIP or TAR-family parser (tar, tar.gz, tar.bz2, tar.zst)
   -> untrusted ArchiveEntry stream
   -> strip/filter/map and post-transform validation
   -> duplicate, collision, permission, link, and resource policies
