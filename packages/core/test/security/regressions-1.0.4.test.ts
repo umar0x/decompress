@@ -533,8 +533,7 @@ test('1.0.4: writeDirectory adopts an existing directory it did not record (cros
   // must adopt it, not throw OutputExistsError. Found by the macOS CI matrix;
   // pinned deterministically here.
   const secureWriter = await import('../../src/writer/secure-writer.ts');
-  type SecureWriterModule = typeof secureWriter;
-  type WriterContext = SecureWriterModule.WriteContext;
+  type WriterContext = Parameters<typeof secureWriter.writeEntry>[1];
   const fsMod = await import('node:fs/promises');
   const root = await fsMod.mkdtemp(nodePath.join(tmpdir(), 'decompress-104-race-'));
   try {
