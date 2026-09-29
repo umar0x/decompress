@@ -30,7 +30,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ['packages/benchmarks/**/*.ts', 'packages/test-fixtures/**/*.ts'],
+    files: ['packages/benchmarks/**/*.ts', 'packages/test-fixtures/**/*.ts', 'examples/**/*.ts'],
     rules: {
       'no-console': 'off',
     },

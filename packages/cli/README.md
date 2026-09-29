@@ -1,6 +1,6 @@
 # @umar0x/decompress-cli
 
-Command-line interface for `@umar0x/decompress` on Node.js 20+.
+Command-line interface for `@umar0x/decompress` on Node.js 22+.
 
 ```sh
 npm install --global @umar0x/decompress-cli

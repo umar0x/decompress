@@ -16,11 +16,11 @@
 import { extract as decompressNative } from '@umar0x/decompress';
 import decompressCompat from '@umar0x/decompress-compatible';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import nodePath from 'node:path';
 import { tmpdir } from 'node:os';
 import tar from 'tar-stream';
-import { createGzip, createBrotliCompress, createDeflate } from 'node:zlib';
-import yauzl from 'yauzl';
+import { createGzip } from 'node:zlib';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync } from 'node:fs';
@@ -207,13 +207,14 @@ async function buildArchive(
     const bytes = await pipeThrough(tarBuffer, createGzip());
     return { format, bytes, fileCount, totalUncompressedBytes };
   }
-  // tar.bz2 - use unbzip2-stream's reverse? It doesn't ship a compressor.
-  // Use zlib deflate (we still call it tar.bz2 for fixture purposes only if
-  // the test cannot produce bzip2). For a faithful benchmark we test TAR.GZ
-  // for the bzip2 path's impact through the tar-common pipeline; bzip2 itself
-  // is left out because Node's zlib does not implement bzip2 compression.
-  // Fall back to gzip-on-tar labelled as tar.gz for the bz2 row's place.
-  throw new Error('bzip2 compression not available in benchmark; use tar.gz');
+  // tar.bz2: Node has no bzip2 compressor, so shell out to the bzip2 binary.
+  // When it is unavailable the scenario is skipped with a logged note instead
+  // of taking the whole run down.
+  const res = spawnSync('bzip2', ['--stdout'], { input: tarBuffer, maxBuffer: Infinity });
+  if (res.status !== 0 || res.stdout === undefined || res.stdout.length === 0) {
+    throw new Error('tar.bz2 scenario unavailable: bzip2 binary not found or failed');
+  }
+  return { format, bytes: res.stdout, fileCount, totalUncompressedBytes };
 }
 
 // ---------------------------------------------------------------------------
@@ -518,12 +519,6 @@ function renderMarkdown(rows: ResultRow[]): string {
   }
   return out.join('\n');
 }
-
-// Suppress unused-import lint for createBrotliCompress/createDeflate, kept
-// available so future scenarios can extend without re-importing.
-void createBrotliCompress;
-void createDeflate;
-void yauzl;
 
 main().catch((e) => {
   console.error(e);

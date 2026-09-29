@@ -16,6 +16,7 @@ import {
   ArchiveSizeExceededError,
   EntrySizeExceededError,
   CorruptArchiveError,
+  TruncatedArchiveError,
 } from '../../src/errors.ts';
 import type { ArchivePlugin } from '../../src/types.ts';
 
@@ -323,9 +324,12 @@ test('extract: malformed recognized archives produce typed corruption errors', a
       () => extract(truncatedZip, nodePath.join(out, 'zip')),
       CorruptArchiveError,
     );
+    // An 18-byte decompressed body cannot fill a 512-byte header block, so
+    // tar-stream reports end-of-data. That is truncation, not corruption:
+    // classified as TruncatedArchiveError since 1.0.4.
     await assert.rejects(
       () => extract(gzipSync(Buffer.from('not a tar archive')), nodePath.join(out, 'gzip')),
-      CorruptArchiveError,
+      TruncatedArchiveError,
     );
   } finally {
     await rm(out, { recursive: true, force: true });

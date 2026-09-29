@@ -1,6 +1,11 @@
 import { Readable, type Transform } from 'node:stream';
 import tar from 'tar-stream';
-import { AbortError, CorruptArchiveError } from '../errors.ts';
+import {
+  AbortError,
+  CorruptArchiveError,
+  TruncatedArchiveError,
+  isDecompressError,
+} from '../errors.ts';
 import type { ArchiveEntry, EntryType } from '../types.ts';
 
 type TarHeader = {
@@ -67,17 +72,39 @@ export async function* parseTarStream(
 
     const path = header.name.endsWith('/') ? header.name.slice(0, -1) : header.name;
     let claimed = false;
+    let bodyEnded = false;
     let resolveBody!: () => void;
     let rejectBody!: (error: Error) => void;
     const bodyDone = new Promise<void>((resolve, reject) => {
       resolveBody = resolve;
       rejectBody = reject;
     });
+    // The main loop consumes bodyDone lazily (only when the consumer asks for
+    // the next entry), so a premature rejection can sit unobserved until then.
+    // Attach a no-op rejection handler so Node never flags it as unhandled;
+    // later awaiters still receive the rejection.
+    bodyDone.catch(() => undefined);
     body.once('end', () => {
+      bodyEnded = true;
       resolveBody();
       next();
     });
     body.once('error', (error: Error) => {
+      bodyEnded = true;
+      rejectBody(error);
+      fail(error);
+    });
+    // A claimed body that is destroyed before it ends (for example when a
+    // writer abandons it after a failed write) must fail the drain instead of
+    // leaving it pending forever: the queue cannot advance past an entry whose
+    // bodyDone never settles, and that was the 1.0.3 pool deadlock. The
+    // rejection is marked collateral: the write failure that caused the
+    // abandonment is the primary error, and the pool demotes marked errors
+    // whenever an unmarked failure exists.
+    body.once('close', () => {
+      if (bodyEnded) return;
+      const error = new Error(`entry body closed before completion: ${path}`);
+      (error as { collateralUnwind?: boolean }).collateralUnwind = true;
       rejectBody(error);
       fail(error);
     });
@@ -110,7 +137,7 @@ export async function* parseTarStream(
   try {
     while (!finished || queue.length > 0) {
       if (signal.aborted) throw new AbortError(signal.reason);
-      if (failure) throw new CorruptArchiveError(failure.message, { cause: failure });
+      if (failure) throw classifyParseFailure(failure);
 
       const queued = queue.shift();
       if (!queued) {
@@ -121,15 +148,53 @@ export async function* parseTarStream(
       }
 
       yield queued.entry;
-      if (!queued.wasClaimed()) queued.body.resume();
-      await queued.bodyDone;
+      if (!queued.wasClaimed()) {
+        // A stream already destroyed upstream (truncation during a previous
+        // entry) throws synchronously on resume; classify instead of letting
+        // the raw ERR_STREAM_DESTROYED escape the typed-error contract.
+        try {
+          queued.body.resume();
+        } catch (error) {
+          throw classifyParseFailure(failure ?? error);
+        }
+      }
+      try {
+        await queued.bodyDone;
+      } catch (error) {
+        // The body failed on its own or was destroyed by the writer after a
+        // failed write. Either way the failure is already typed or must not
+        // be re-wrapped here (for example an injected EFBIG/EACCES fs error).
+        throw classifyParseFailure(error);
+      }
     }
-    if (failure) throw new CorruptArchiveError(failure.message, { cause: failure });
+    if (failure) throw classifyParseFailure(failure);
   } finally {
     source.destroy();
     decompressor?.destroy();
     extract.destroy();
   }
+}
+
+/**
+ * Classify a parser- or body-level failure into the typed error contract.
+ * DecompressErrors and writer-injected fs errors surface unchanged; messages
+ * that indicate truncation map to TruncatedArchiveError; everything else is a
+ * corrupt archive. Without this, raw tar-stream errors ("Unexpected end of
+ * data") escape as plain Errors.
+ */
+function classifyParseFailure(error: unknown): Error {
+  if (error instanceof Error) {
+    if (isDecompressError(error)) return error;
+    if ((error as { injectedByWriter?: boolean }).injectedByWriter) return error;
+    const collateral = (error as { collateralUnwind?: boolean }).collateralUnwind === true;
+    const message = error.message ?? String(error);
+    const classified = /end of data|truncated|premature|unexpected end/i.test(message)
+      ? new TruncatedArchiveError(message, { cause: error })
+      : new CorruptArchiveError(message, { cause: error });
+    if (collateral) (classified as { collateralUnwind?: boolean }).collateralUnwind = true;
+    return classified;
+  }
+  return new CorruptArchiveError(String(error));
 }
 
 function mapType(tarType: string): EntryType | null {

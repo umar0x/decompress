@@ -1,10 +1,10 @@
 {
   "name": "@umar0x/decompress-fuzz",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "private": true,
   "type": "module",
   "description": "Fuzz + property tests for decompress",
   "dependencies": {
-    "@umar0x/decompress": "1.0.3"
+    "@umar0x/decompress": "^1.0.4"
   }
 }

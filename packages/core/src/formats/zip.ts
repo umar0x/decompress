@@ -72,7 +72,6 @@ async function* parseZip(
     }
   };
   input.teardown?.push(closeArchive);
-  let entriesDrained = false;
   try {
     zipfile = input.buffer
       ? await yauzlModern.fromBufferPromise(input.buffer, options)
@@ -131,17 +130,17 @@ async function* parseZip(
         },
       };
     }
-    entriesDrained = true;
   } catch (error) {
-    closeArchive();
     if (error instanceof AbortError || error instanceof CorruptArchiveError) throw error;
     throw new CorruptArchiveError(`invalid ZIP archive: ${(error as Error).message}`, {
       cause: error,
     });
   } finally {
-    // If the generator is abandoned before draining (consumer error), close
-    // here as well; success and normal-drain paths rely on pipeline teardown.
-    if (!entriesDrained) closeArchive();
+    // The archive handle is closed exclusively through the registered
+    // teardown, which the API entry points run AFTER the write pool has
+    // settled. Closing here instead would destroy lazy entry streams that
+    // in-flight workers are still reading, turning their environmental or
+    // policy failures into spurious yauzl "closed" errors.
   }
 }
 

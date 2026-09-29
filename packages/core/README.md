@@ -1,6 +1,6 @@
 # @umar0x/decompress
 
-Native secure archive extraction for Node.js 20+. Supports ZIP, TAR, TAR.GZ, and TAR.BZ2 with
+Native secure archive extraction for Node.js 22+. Supports ZIP, TAR, TAR.GZ, TAR.BZ2, and TAR.ZST with
 streamed file bodies, atomic output, resource ceilings, typed errors, audit/list APIs, ESM, and
 CommonJS.
 
