@@ -15,6 +15,7 @@ import {
 } from './fs-ops.ts';
 import {
   AbortError,
+  CorruptArchiveError,
   EntrySizeExceededError,
   HardlinkTargetMissingError,
   LinkEscapeError,
@@ -25,6 +26,8 @@ import {
   OutputExistsError,
   TotalSizeExceededError,
   CompressionRatioExceededError,
+  TruncatedArchiveError,
+  isDecompressError,
 } from '../errors.ts';
 import { validateSymlinkTarget, validateHardlinkTarget } from '../policy/link-policy.ts';
 
@@ -52,6 +55,13 @@ export type WriteContext = {
   createdDirs: Set<string>;
   warnings: Warning[];
   pathCtx: PathCtx;
+  /**
+   * Deferred directory-mode sink set by the extractor. Directory entries are
+   * created owner-accessible (0700) while content is being written; the
+   * archive-declared mode is applied through this callback after all content
+   * exists, deepest first, before the atomic commit.
+   */
+  deferDirMode?: (path: string, mode: number) => void;
   budget?: {
     totalBytes: number;
     archiveSize: number;
@@ -102,7 +112,7 @@ export async function writeEntry(entry: ArchiveEntry, ctx: WriteContext): Promis
 
   switch (entry.type) {
     case 'directory':
-      return writeDirectory(entry, dest, ctx);
+      return writeDirectory(entry, dest, ctx, ctx.deferDirMode);
     case 'symlink':
       if (!ctx.policy.allowSymlinks) {
         throw new SymlinkRefusedError(`symlink entry refused: ${entry.path}`);
@@ -222,16 +232,24 @@ async function writeDirectory(
   entry: ArchiveEntry,
   dest: string,
   ctx: WriteContext,
+  deferMode?: (path: string, mode: number) => void,
 ): Promise<EntryResult> {
   await ensureParentInside(nodePath.dirname(dest), ctx);
 
+  // Final mode is the sanitized archive-declared mode. During extraction the
+  // directory is created owner-accessible regardless of the declared mode:
+  // a directory entry carrying a non-executable mode (0644, 0444, 0000) would
+  // otherwise make every subsequent write below it fail with EACCES, or leave
+  // an unusable tree when no children follow. The declared mode is applied
+  // after all content exists, mirroring GNU tar's deferred directory modes.
   const mode = sanitizeMode(entry.mode, 'directory', {
     preservePermissions: ctx.policy.preservePermissions,
     umask: ctx.umask,
   });
+  const creationMode = 0o700;
 
   try {
-    await safeMkdir(dest, { mode, signal: ctx.signal });
+    await safeMkdir(dest, { mode: creationMode, signal: ctx.signal });
     ctx.createdDirs.add(dest);
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
@@ -242,6 +260,7 @@ async function writeDirectory(
         const st = await safeLstat(dest, ctx.signal);
         if (st.isSymbolicLink()) throw new LinkThroughSymlinkError(`symlink at dest: ${dest}`);
         if (!st.isDirectory()) throw new NotADirectoryError(`not a directory: ${dest}`);
+        ctx.createdDirs.add(dest);
       } else {
         throw new OutputExistsError(`refusing to overwrite existing directory: ${dest}`);
       }
@@ -249,6 +268,8 @@ async function writeDirectory(
       throw e;
     }
   }
+
+  deferMode?.(dest, mode);
 
   return { kind: 'directory', path: dest, mode, mtime: entry.mtime ?? null };
 }
@@ -262,54 +283,70 @@ async function writeFileEntry(
   // unclaimed bodies when the pipeline advances past an entry; concurrent
   // writers must therefore claim synchronously on receipt so the drain only
   // ever applies to entries the pipeline actually skipped.
-  const contents = entry.buffer ? [await entry.buffer()] : entry.stream ? entry.stream() : [];
+  const contents: Iterable<Buffer | Uint8Array> | NodeJS.ReadableStream | undefined = entry.buffer
+    ? [await entry.buffer()]
+    : entry.stream
+      ? entry.stream()
+      : [];
 
-  await ensureParentInside(nodePath.dirname(dest), ctx);
-
-  const mode = sanitizeMode(entry.mode, 'file', {
-    preservePermissions: ctx.policy.preservePermissions,
-    umask: ctx.umask,
-  });
-
-  // Exclusive creation with O_NOFOLLOW (refuses to follow a final-component
-  // symlink) and O_EXCL (refuses to clobber an existing path).
-  let fh;
+  // Every failure after the claim must destroy the claimed body: a body left
+  // unread blocks the parser pipeline from advancing (the TAR queue awaits its
+  // drain) and deadlocks concurrent workers. This includes failures before the
+  // file is even opened (ancestor checks, mode computation, EEXIST policy).
   try {
-    fh = await safeOpenExclusive(dest, 0o600, ctx.signal);
-  } catch (e) {
-    const err = e as NodeJS.ErrnoException;
-    if (err.code === 'EEXIST') {
-      if (ctx.policy.overwrite) {
-        // Verify it's a regular file (not a symlink we'd be clobbering through).
-        const st = await safeLstat(dest, ctx.signal);
-        if (st.isSymbolicLink()) throw new LinkThroughSymlinkError(`symlink at dest: ${dest}`);
-        await safeUnlink(dest, ctx.signal);
-        fh = await safeOpenExclusive(dest, 0o600, ctx.signal);
+    await ensureParentInside(nodePath.dirname(dest), ctx);
+
+    const mode = sanitizeMode(entry.mode, 'file', {
+      preservePermissions: ctx.policy.preservePermissions,
+      umask: ctx.umask,
+    });
+
+    // Exclusive creation with O_NOFOLLOW (refuses to follow a final-component
+    // symlink) and O_EXCL (refuses to clobber an existing path).
+    let fh;
+    try {
+      fh = await safeOpenExclusive(dest, 0o600, ctx.signal);
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code === 'EEXIST') {
+        if (ctx.policy.overwrite) {
+          // Verify it's a regular file (not a symlink we'd be clobbering through).
+          const st = await safeLstat(dest, ctx.signal);
+          if (st.isSymbolicLink()) throw new LinkThroughSymlinkError(`symlink at dest: ${dest}`);
+          await safeUnlink(dest, ctx.signal);
+          fh = await safeOpenExclusive(dest, 0o600, ctx.signal);
+        } else {
+          throw new OutputExistsError(`refusing to overwrite existing file: ${dest}`);
+        }
       } else {
-        throw new OutputExistsError(`refusing to overwrite existing file: ${dest}`);
+        throw e;
       }
-    } else {
-      throw e;
     }
-  }
 
-  let bytes = 0;
-  try {
-    for await (const value of contents) {
-      if (ctx.signal?.aborted) throw new AbortError(ctx.signal.reason);
-      const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value as unknown as Uint8Array);
-      bytes += chunk.length;
-      enforceRollingLimits(entry.path, bytes, chunk.length, ctx);
-      await safeWriteAll(fh, chunk, ctx.signal);
+    let bytes = 0;
+    try {
+      for await (const value of contents) {
+        if (ctx.signal?.aborted) throw new AbortError(ctx.signal.reason);
+        const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value as unknown as Uint8Array);
+        bytes += chunk.length;
+        enforceRollingLimits(entry.path, bytes, chunk.length, ctx);
+        await safeWriteAll(fh, chunk, ctx.signal);
+      }
+      await safeFchmod(fh, mode, ctx.signal);
+    } finally {
+      await safeClose(fh);
     }
-    await safeFchmod(fh, mode, ctx.signal);
-  } finally {
-    await safeClose(fh);
-  }
 
-  // mtime is applied by the caller in a post-write batch; the staging tree is
-  // invisible until the atomic rename, so deferral is externally unobservable.
-  return { kind: 'file', path: dest, mode, bytes, mtime: entry.mtime ?? null };
+    // mtime is applied by the caller in a post-write batch; the staging tree is
+    // invisible until the atomic rename, so deferral is externally unobservable.
+    return { kind: 'file', path: dest, mode, bytes, mtime: entry.mtime ?? null };
+  } catch (error) {
+    destroyClaimedBody(contents, error);
+    // A body that fails on its own (truncated or corrupt archive) would surface
+    // as a raw parser error. Normalize it so callers always receive a typed
+    // DecompressError; preserve policy/limit errors as-is.
+    throw normalizeBodyError(error) as Error;
+  }
 }
 
 async function writeSymlink(
@@ -423,4 +460,58 @@ function enforceRollingLimits(
       throw new CompressionRatioExceededError(ratio, ctx.limits.maxCompressionRatio);
     }
   }
+}
+
+/**
+ * Destroy a claimed-but-undrained entry body with the failure that aborted it.
+ * The TAR parser cannot advance past an entry whose body was claimed and then
+ * abandoned: its queue awaits the body drain forever. Destroying the stream
+ * with the error rejects that await, unwinds the parser, and lets the worker
+ * pool settle instead of deadlocking. No-op for buffer-backed entries and for
+ * streams that already ended.
+ */
+export function destroyClaimedBody(contents: unknown, error: unknown): void {
+  if (contents === null || contents === undefined || Array.isArray(contents)) return;
+  // Mark the error as writer-originated even when the stream cannot take the
+  // injected destroy: the for-await cleanup may have destroyed it already.
+  // Classification relies on this flag so environmental fs errors (EFBIG,
+  // EACCES, ENOSPC) never masquerade as archive corruption.
+  if (error instanceof Error) {
+    (error as { injectedByWriter?: boolean }).injectedByWriter = true;
+  }
+  const stream = contents as {
+    destroyed?: boolean;
+    ended?: boolean;
+    readableEnded?: boolean;
+    destroy?: (error?: Error) => void;
+  };
+  if (typeof stream.destroy !== 'function') return;
+  if (stream.destroyed || stream.ended || stream.readableEnded) return;
+  try {
+    stream.destroy(error instanceof Error ? error : new Error(String(error)));
+  } catch {
+    // Destroying a failed stream must never mask the original error.
+  }
+}
+
+/**
+ * Normalize an error that surfaced while reading an entry body. Parser-origin
+ * failures arrive as raw stream errors (for example tar-stream's "Unexpected
+ * end of data") and would otherwise escape the typed-error contract.
+ * DecompressError policy failures are preserved as-is; so are Node fs errors,
+ * which carry their own errno and already classify correctly.
+ */
+export function normalizeBodyError(error: unknown): unknown {
+  if (error instanceof Error && !isDecompressError(error)) {
+    const message = error.message ?? String(error);
+    if (/end of data|truncated|premature|unexpected end/i.test(message)) {
+      return new TruncatedArchiveError(`truncated archive while reading entry body: ${message}`, {
+        cause: error,
+      });
+    }
+    if (!(error as { injectedByWriter?: boolean }).injectedByWriter) {
+      return new CorruptArchiveError(`error reading entry body: ${message}`, { cause: error });
+    }
+  }
+  return error;
 }

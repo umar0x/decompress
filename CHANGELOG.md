@@ -3,6 +3,82 @@
 All notable changes are documented here. The project follows Keep a Changelog and Semantic
 Versioning.
 
+## [1.0.4] - 2026-09-29
+
+A correctness and reliability release. Two real defects are fixed, both found the same week by
+adversarial corpus testing and both reproduced with permanent regression tests before the fix
+landed. No public type signatures changed.
+
+### Fixed
+
+- Directory entries carrying a mode without execute bits (0644, 0444, 0000 and friends) broke
+  extraction. The writer created the directory with the declared mode immediately, so every
+  following write below it failed with EACCES, and a directory with no children was left
+  silently unusable. Directories are now created 0700 while content is being written and set to
+  their sanitized declared mode at the end, after file mtimes and directory mtimes, deepest
+  first. This is the same ordering GNU tar has used for decades. Extracting a 60-level tree of
+  0644 directories, which hung forever on 1.0.3, now completes in about 94 ms.
+- A write that failed mid-entry could deadlock the whole extraction. The TAR parser cannot move
+  past an entry whose claimed body was never drained, and the worker pool blocked on it forever:
+  the promise never settled and the staging directory leaked. The same shape triggered on real
+  write errors such as EFBIG with a small `ulimit -f`. Now every failure after a body claim
+  destroys the claimed body, the parser treats a premature body close as a failure instead of
+  waiting forever, and the pool settles, cleans up staging, and rethrows the failure that
+  actually started the unwind. Environmental errors (EFBIG, EACCES, ENOSPC) keep their errno and
+  are never reclassified as archive corruption.
+- Truncated archives now surface typed errors. `TRUNCATED_ARCHIVE` existed as a code since 1.0.0
+  but nothing threw it; a TAR cut inside an entry body leaked tar-stream's raw
+  "Unexpected end of data" as a plain Error. Parser and writer failures are now classified:
+  truncation shapes throw `TruncatedArchiveError`, other body failures throw
+  `CorruptArchiveError` with the original as `cause`. One nuance is left open on purpose: a TAR
+  cut at exactly 50 percent can surface streamx's own `StreamError` (code `STREAM_DESTROYED`)
+  depending on which entry the cut lands in. It still fails closed with no output and no staging
+  leftover; chasing it further means intercepting streamx internals.
+- ZIP archive handles now close through pipeline teardown only, after the write pool settles.
+  Closing them when the parser unwound let yauzl destroy lazy entry streams that in-flight
+  workers were still reading, which turned unrelated failures into spurious "closed" errors.
+
+### Changed
+
+- Directory modes in the result entries are unchanged; the on-disk result of a successful
+  extraction is byte-for-byte what 1.0.3 produced when 1.0.3 succeeded. What changed is that
+  non-executable declared modes now produce that result instead of EACCES or a hang, and the
+  declared mode is applied after all content exists rather than at creation.
+- `gzip` content that decompresses to fewer bytes than a TAR header block is now
+  `TruncatedArchiveError` instead of `CorruptArchiveError`. The stream ended before a complete
+  header, so truncation is the honest classification.
+
+### Dependencies
+
+- Dev tree updated: `@types/node` 26.6.3, `@types/tar-stream` 3.1.5, `eslint` 10.11.0,
+  `prettier` 3.9.9, `tsx` 4.23.15, `typescript-eslint` 8.71.0, root overrides
+  `brace-expansion` 5.0.12 and `esbuild` 0.28.2. No runtime dependency changes.
+- The `tar-stream` override pinning the dev install to 3.2.0 stays. I re-verified against the
+  latest registry state that 3.2.1 still ships a `index.d.ts` that does not compile (it breaks
+  the default export), so the pin remains justified. Runtime compatibility with 3.2.1 is
+  unaffected.
+- TypeScript stays on 5.9. `typescript-eslint` 8.71.0 declares `typescript >=4.8.4 <6.1.0`,
+  which excludes the 7.0 line. That is the same situation as 1.0.2.
+
+### Testing and quality
+
+- 334 tests (was 323). New file `regressions-1.0.4.test.ts` pins every fix above, including a
+  hand-built TAR header builder for mode-0000 directories (tar-stream's packer normalizes a
+  falsy mode to 0755, so 0000 cannot travel through it) and a watchdog-raced pool test that
+  fails loudly if a regression ever makes extraction hang again.
+- Coverage 92.77 percent lines, 85.14 percent branches, 97.5 percent functions. Per-critical-file
+  floors unchanged and passing.
+- The internal benchmark runner gained a working tar.bz2 path (bzip2 binary, skipped with a note
+  when unavailable) and lost its dead imports.
+
+### Performance
+
+- Hot-path performance is unchanged; the fixes live on failure paths and post-write metadata
+  phases. Measured with the same 27-scenario corpus, 5 runs, round-robin, before and after:
+  every scenario is within the 10-30 percent run-to-run noise of this 2-vCPU host. The one
+  scenario that changed is the tree of 0644 directories, which went from never settling to
+  94 ms. Raw data for both runs ships with the release notes.
+
 ## [1.0.3] - 2026-09-15
 
 A maintenance and capability release. The big additions are tar.zst (Zstandard-compressed TAR)

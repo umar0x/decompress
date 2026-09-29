@@ -4,6 +4,7 @@ import { mkdir, realpath, rename, rm, rmdir, lstat } from 'node:fs/promises';
 import type { ArchiveEntry, Limits, PathCtx, Warning } from '../types.ts';
 import { writeEntry, type WriteContext, type EntryResult } from './secure-writer.ts';
 import { applyMtime } from './permissions.ts';
+import { safeChmod } from './fs-ops.ts';
 import { detectPlatform } from './path-security.ts';
 import {
   AbortError,
@@ -173,6 +174,9 @@ export async function atomicExtract(
     warnings: [],
     pathCtx,
     budget: { totalBytes: 0, archiveSize: opts.archiveSize },
+    deferDirMode: (path, mode) => {
+      deferredDirModes.push({ path, mode });
+    },
   };
 
   const knownTotal = Array.isArray(entries) ? entries.length : null;
@@ -184,6 +188,7 @@ export async function atomicExtract(
     type: 'file' | 'directory' | 'symlink';
     order: number;
   }> = [];
+  const deferredDirModes: Array<{ path: string; mode: number }> = [];
   let entryCount = 0;
   let processedCount = 0;
 
@@ -251,6 +256,30 @@ export async function atomicExtract(
     if (concurrency === 1 || Symbol.asyncIterator in (entries as object)) {
       const iterator = (entries as AsyncIterable<ArchiveEntry>)[Symbol.asyncIterator]();
       const entryErrors = new Map<number, unknown>();
+      // First failure wins, with one carve-out: errors marked collateralUnwind
+      // (produced by the parser rejecting a body that a failed write already
+      // abandoned) are demoted whenever any unmarked failure exists, so the
+      // unwind never masks the failure that started it. Single-failure cases
+      // stay deterministic; concurrent write failures resolve to the one the
+      // pool observed first.
+      let primaryError: unknown;
+      let primaryRecorded = false;
+      const recordError = (index: number, error: unknown): void => {
+        entryErrors.set(index, error);
+        if (!primaryRecorded) {
+          primaryRecorded = true;
+          primaryError = error;
+        }
+      };
+      const selectError = (): unknown => {
+        if (primaryError === undefined) return undefined;
+        const primaryMarked = (primaryError as { collateralUnwind?: boolean }).collateralUnwind;
+        if (!primaryMarked) return primaryError;
+        for (const error of entryErrors.values()) {
+          if (!(error as { collateralUnwind?: boolean }).collateralUnwind) return error;
+        }
+        return primaryError;
+      };
       // Serialized pull: only one worker advances the parser at a time. For
       // TAR-family generators this degenerates to today's strictly sequential
       // behavior because each body must drain before the next entry yields;
@@ -267,12 +296,23 @@ export async function atomicExtract(
       const worker = async (): Promise<void> => {
         for (;;) {
           if (entryErrors.size > 0 || signal?.aborted) return;
-          const next = await pullNext();
+          let next: IteratorResult<ArchiveEntry>;
+          try {
+            next = await pullNext();
+          } catch (error) {
+            // The parser pipeline rejected: either a policy failure from the
+            // entry pipeline (for example FileCountExceededError) or the
+            // unwind after a write failure. Unwinding can break in-flight
+            // workers' streams, so the FIRST recorded failure must win over
+            // any collateral errors the unwind itself causes.
+            recordError(Number.MAX_SAFE_INTEGER, error);
+            return;
+          }
           if (next.done) return;
           const entry = next.value;
           const index = entryCount++;
           if (entryCount > opts.limits.maxFiles) {
-            entryErrors.set(index, new FileCountExceededError(entryCount, opts.limits.maxFiles));
+            recordError(index, new FileCountExceededError(entryCount, opts.limits.maxFiles));
             return;
           }
           if (entry.type === 'hardlink') {
@@ -285,20 +325,20 @@ export async function atomicExtract(
           try {
             await writeAndRecord(entry, index);
           } catch (error) {
-            // Settle-all-then-rethrow: in-flight entries finish, then the first
-            // failure in entry order is rethrown. The output is atomic either way.
-            entryErrors.set(index, error);
+            // Settle-all-then-rethrow: in-flight entries finish, then the
+            // first recorded failure is rethrown. The output is atomic.
+            recordError(index, error);
             return;
           }
         }
       };
       await Promise.all(Array.from({ length: concurrency }, () => worker()));
-      if (entryErrors.size > 0) {
+      const selected = selectError();
+      if (selected !== undefined) {
         // Deterministically unwind the parser so its cleanup (stream
         // destruction) runs instead of waiting for GC of a suspended generator.
         await iterator.return?.().catch(() => undefined);
-        const firstIndex = Math.min(...entryErrors.keys());
-        throw entryErrors.get(firstIndex);
+        throw selected;
       }
     } else {
       const list = entries as Iterable<ArchiveEntry>;
@@ -317,15 +357,20 @@ export async function atomicExtract(
 
     await writeHardlinksWithDependencies(hardlinks, writeOne);
 
-    // Apply entry mtimes now that all content exists. The staging tree is
-    // private and invisible until the commit rename, so deferral is
-    // externally unobservable. Files and symlinks are applied in bounded
-    // parallel batches; directories are applied last, deepest first, because
-    // directory creation mutates parent mtimes (utimes on files does not).
+    // Post-write metadata phases, in this order (each needs the tree still
+    // traversable, so directory modes are applied last, mirroring GNU tar):
+    //   1. file and symlink mtimes (parallel batches)
+    //   2. directory mtimes, deepest first (child creation mutates parents)
+    //   3. directory modes, deepest first. Directory entries are created 0700
+    //      while content is written; an archive-declared non-executable mode
+    //      (0644/0444/0000) is applied only after every utime has landed,
+    //      because path resolution for the earlier phases needs +x on every
+    //      ancestor. Deepest first so each chmod's ancestors are still 0700.
     const fileMtimes = deferredMtimes.filter((m) => m.type !== 'directory');
     const dirMtimes = deferredMtimes
       .filter((m) => m.type === 'directory')
       .sort((a, b) => pathDepth(b.path) - pathDepth(a.path));
+    deferredDirModes.sort((a, b) => pathDepth(b.path) - pathDepth(a.path));
     const mtimeErrors: Array<{ order: number; error: unknown }> = [];
     for (let i = 0; i < fileMtimes.length; i += MTIME_BATCH) {
       const batch = fileMtimes.slice(i, i + MTIME_BATCH);
@@ -345,6 +390,17 @@ export async function atomicExtract(
       } catch (error) {
         mtimeErrors.push({ order: item.order, error });
       }
+    }
+    const modeErrors: Array<{ order: number; error: unknown }> = [];
+    for (const item of deferredDirModes) {
+      try {
+        await safeChmod(item.path, item.mode, signal);
+      } catch (error) {
+        modeErrors.push({ order: Number.MAX_SAFE_INTEGER, error });
+      }
+    }
+    if (modeErrors.length > 0) {
+      throw modeErrors[0]!.error;
     }
     if (mtimeErrors.length > 0) {
       // First failure in entry order, matching the writer's failure contract.

@@ -148,12 +148,29 @@ Exit codes are `0` for success, `1` for an extraction/policy error or a high/cri
 
 ## Performance
 
-On a 2-vCPU Linux host with a corpus spanning 100 to 5,000-file archives, 128 MiB single files,
-60-level nesting, unicode names, and mixed permissions (5-run medians): this library leads both
-`decompress` 4.2.1 and `@xhmikosr/decompress` 11.1.4 on every throughput-heavy and concurrent
-scenario, with 10 to 25 times lower peak memory on large single files (streaming writer against
-whole-archive buffering). `@xhmikosr/decompress` keeps a 3 to 15 ms edge on tiny archives, the
-price this library pays for atomic staging and per-entry policy validation.
+Measured on a 2-vCPU Linux host, Node 24.21, one corpus built once and shared by all three
+libraries, five timed runs per scenario interleaved round-robin after a warmup (medians below;
+raw runs with mean, standard deviation, min, and max ship with the release):
+
+| Scenario (median)          | this library | decompress 4.2.1 | @xhmikosr/decompress 11.1.4 |
+| -------------------------- | -----------: | ---------------: | --------------------------: |
+| ZIP, 5000 files x 1 KiB    |        2.7 s |            5.8 s |                       2.9 s |
+| TAR.GZ, 5000 files x 1 KiB |        1.6 s |            6.0 s |                       2.3 s |
+| ZIP, 1 x 128 MiB (deflate) |       509 ms |           557 ms |                      635 ms |
+| TAR, 1 x 128 MiB           |       220 ms |           340 ms |                      155 ms |
+| 60-level tree, 0644 dirs   |        96 ms |          3280 ms |                      771 ms |
+| 8 parallel ZIP extractions |        1.7 s |            4.6 s |                       2.4 s |
+| Peak RSS, 1 x 128 MiB TAR  |       84 MiB |          702 MiB |                     323 MiB |
+
+Where this library leads: every many-small-files scenario, deep trees, concurrent extraction,
+deflate-heavy single files, and peak memory on large files (3 to 8 times lower than the buffered
+competition). Where the competition leads: @xhmikosr/decompress is 30 to 65 ms faster on
+uncompressed 128 MiB TAR and a few milliseconds faster on tiny archives, which is the price of
+atomic staging and per-entry policy validation. decompress 4.2.1 trails everywhere and hangs on
+entry names 4096 characters long.
+
+A 60-level tree of 0644-mode directories is worth calling out because it is a 1.0.4 fix: on
+1.0.3 that archive never finished extracting at all.
 
 ## Formats and dependencies
 

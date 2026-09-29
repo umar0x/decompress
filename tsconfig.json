@@ -19,6 +19,6 @@
     "noEmit": true,
     "allowImportingTsExtensions": true
   },
-  "include": ["packages/**/*.ts", "scripts/**/*.mjs", "types/**/*.d.ts"],
+  "include": ["packages/**/*.ts", "scripts/**/*.mjs", "types/**/*.d.ts", "examples/**/*.ts"],
   "exclude": ["node_modules", "dist", "**/dist", "**/node_modules"]
 }
