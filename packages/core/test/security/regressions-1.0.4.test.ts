@@ -104,18 +104,24 @@ test('1.0.4: directory entries with non-executable declared modes extract and ke
     );
 
     // Final directory modes are the sanitized declaration (capped at 0755,
-    // umask applied), applied after content lands like GNU tar does. Assert
-    // these before unlocking, while the tree is exactly as extracted.
-    const umask = process.umask();
-    const expect = (declared: number) => declared & 0o755 & ~umask;
-    assert.equal((await stat(nodePath.join(target, 'd0644'))).mode & 0o7777, expect(0o0644));
-    assert.equal((await stat(nodePath.join(target, 'd0444'))).mode & 0o7777, expect(0o0444));
-    assert.equal((await stat(nodePath.join(target, 'nested/a'))).mode & 0o7777, expect(0o0755));
-    assert.equal((await stat(nodePath.join(target, 'nested/a/b'))).mode & 0o7777, expect(0o0400));
-    // tail declared 0000 but tar-stream's packer normalizes a falsy mode to
-    // 0755, so the archive on disk actually declares 0755 for it. Assert what
-    // the bytes say; the genuine 0000 case is the hand-built test below.
-    assert.equal((await stat(nodePath.join(target, 'tail'))).mode & 0o7777, expect(0o0755));
+    // umask applied), applied after content lands like GNU tar does. Exact
+    // POSIX modes are asserted on POSIX only: on Windows, chmod on a
+    // directory is effectively a no-op (only the file write bit maps to the
+    // read-only attribute), so directories report the synthesized 0o666
+    // regardless of the declared mode. Content and usability are asserted
+    // on every platform below.
+    if (process.platform !== 'win32') {
+      const umask = process.umask();
+      const expect = (declared: number) => declared & 0o755 & ~umask;
+      assert.equal((await stat(nodePath.join(target, 'd0644'))).mode & 0o7777, expect(0o0644));
+      assert.equal((await stat(nodePath.join(target, 'd0444'))).mode & 0o7777, expect(0o0444));
+      assert.equal((await stat(nodePath.join(target, 'nested/a'))).mode & 0o7777, expect(0o0755));
+      assert.equal((await stat(nodePath.join(target, 'nested/a/b'))).mode & 0o7777, expect(0o0400));
+      // tail declared 0000 but tar-stream's packer normalizes a falsy mode to
+      // 0755, so the archive on disk actually declares 0755 for it. Assert what
+      // the bytes say; the genuine 0000 case is the hand-built test below.
+      assert.equal((await stat(nodePath.join(target, 'tail'))).mode & 0o7777, expect(0o0755));
+    }
 
     // Children were written through directories that were non-traversable at
     // declaration time. Verify content after unlocking the tree for cleanup.
@@ -186,9 +192,13 @@ test('1.0.4: a hand-built tar declaring mode 0000 directories extracts them and 
     const result = await extract(archive, target, {});
     assert.equal(result.entries.length, 2);
     assert.equal(result.totalBytes, 'inside a 0000 dir'.length);
-    // Declared 0000, umask cannot add bits: final mode is 0000.
-    const umask = process.umask();
-    assert.equal((await stat(nodePath.join(target, 'locked'))).mode & 0o7777, 0o0000 & ~umask);
+    // Declared 0000, umask cannot add bits: final mode is 0000. POSIX only,
+    // for the same reason as the test above: chmod on directories is a no-op
+    // on Windows, which reports its own synthesized mode instead.
+    if (process.platform !== 'win32') {
+      const umask = process.umask();
+      assert.equal((await stat(nodePath.join(target, 'locked'))).mode & 0o7777, 0o0000 & ~umask);
+    }
     await unlockTree(target);
     assert.equal(
       await readFile(nodePath.join(target, 'locked/inside.txt'), 'utf8'),
