@@ -254,16 +254,15 @@ async function writeDirectory(
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
     if (err.code === 'EEXIST') {
-      if (ctx.createdDirs.has(dest)) {
-        // Repeated directory entries are idempotent.
-      } else if (ctx.policy.overwrite) {
-        const st = await safeLstat(dest, ctx.signal);
-        if (st.isSymbolicLink()) throw new LinkThroughSymlinkError(`symlink at dest: ${dest}`);
-        if (!st.isDirectory()) throw new NotADirectoryError(`not a directory: ${dest}`);
-        ctx.createdDirs.add(dest);
-      } else {
-        throw new OutputExistsError(`refusing to overwrite existing directory: ${dest}`);
-      }
+      // The staging root is private (0700, this process), so an existing
+      // directory here is always ours: either an earlier entry created it, or
+      // a concurrent worker created it as an implicit parent and its
+      // createdDirs entry has not landed yet. Verify and adopt it. A symlink
+      // or non-directory at the path is still a policy failure.
+      const st = await safeLstat(dest, ctx.signal);
+      if (st.isSymbolicLink()) throw new LinkThroughSymlinkError(`symlink at dest: ${dest}`);
+      if (!st.isDirectory()) throw new NotADirectoryError(`not a directory: ${dest}`);
+      ctx.createdDirs.add(dest);
     } else {
       throw e;
     }

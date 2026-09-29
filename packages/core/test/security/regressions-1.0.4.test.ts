@@ -524,3 +524,47 @@ test('1.0.4: a real tar.gz whose first entry exceeds a rolling limit rejects typ
     await rm(out, { recursive: true, force: true });
   }
 });
+
+test('1.0.4: writeDirectory adopts an existing directory it did not record (cross-worker race)', async () => {
+  // Two workers can race creating the same directory: one creates it as an
+  // implicit parent, the other as an explicit entry. The losing mkdir sees
+  // EEXIST before the winner records the path in createdDirs. Inside the
+  // private staging tree an existing directory is always ours, so the writer
+  // must adopt it, not throw OutputExistsError. Found by the macOS CI matrix;
+  // pinned deterministically here.
+  const secureWriter = await import('../../src/writer/secure-writer.ts');
+  const fsMod = await import('node:fs/promises');
+  const root = await fsMod.mkdtemp(nodePath.join(tmpdir(), 'decompress-104-race-'));
+  try {
+    const staging = nodePath.join(root, 'staging');
+    await fsMod.mkdir(staging, { mode: 0o700 });
+    // 'a/b' exists on disk but is NOT in createdDirs, simulating the winner's
+    // mkdir having completed while its bookkeeping has not landed yet.
+    await fsMod.mkdir(nodePath.join(staging, 'a', 'b'), { mode: 0o700, recursive: true });
+    const ctx = {
+      realOutputPath: staging,
+      umask: process.umask(),
+      limits: DEFAULT_LIMITS,
+      policy: {
+        allowSymlinks: false,
+        allowHardlinks: false,
+        preservePermissions: false,
+        overwrite: false,
+        symlinkFallback: 'error' as const,
+      },
+      createdDirs: new Set<string>([staging]),
+      warnings: [],
+      pathCtx: { platform: 'posix' as const, caseInsensitive: false, limits: DEFAULT_LIMITS },
+      budget: { totalBytes: 0, archiveSize: 64 },
+    };
+    const result = await secureWriter.writeEntry(
+      { path: 'a/b', type: 'directory', mode: 0o755, sourceFormat: 'test' },
+      ctx as unknown as import('../../src/writer/secure-writer.ts').WriteContext,
+    );
+    assert.equal(result.kind, 'directory');
+    assert.ok(ctx.createdDirs.has(nodePath.join(staging, 'a', 'b')), 'adopted into createdDirs');
+  } finally {
+    await fsMod.chmod(root, 0o700).catch(() => {});
+    await fsMod.rm(root, { recursive: true, force: true });
+  }
+});
