@@ -55,7 +55,7 @@
   ],
   "dependencies": {
     "tar-stream": "^3.2.1",
-    "yauzl": "^3.4.0",
-    "unbzip2-stream": "^1.4.3"
+    "unbzip2-stream": "^1.4.3",
+    "yauzl": "^3.4.0"
   }
 }
