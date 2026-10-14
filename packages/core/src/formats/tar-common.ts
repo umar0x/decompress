@@ -17,6 +17,12 @@ type TarHeader = {
   linkname?: string;
 };
 
+// tar-stream 3.2.2 hands entry bodies as streamx Sources. A Source is a
+// Node-Readable-compatible object for every operation this parser performs
+// (resume, once, destroy, async iteration); the type-level mismatch is only
+// in optional Node streams fields, so it is narrowed once, at storage.
+type TarBody = NodeJS.ReadableStream;
+
 type QueuedEntry = {
   entry: ArchiveEntry;
   body: NodeJS.ReadableStream;
@@ -44,9 +50,33 @@ export async function* parseTarStream(
     wake?.();
     wake = undefined;
   };
+  let teardown = false;
   const fail = (error: Error) => {
     failure ??= error;
     notify();
+    // A failed source or decompressor leaves tar-stream idle: piped error
+    // events are not forwarded, so pending entry bodies never end and a
+    // consumer parked on bodyDone would wait forever with no active handles
+    // (the truncated-gz deadlock). Destroy the downstream pipeline with the
+    // primary failure so every pending body rejects and the loop unwinds.
+    if (!teardown) {
+      teardown = true;
+      try {
+        extract.destroy(error);
+      } catch {
+        // already gone
+      }
+      try {
+        decompressor?.destroy();
+      } catch {
+        // already gone
+      }
+      try {
+        source.destroy();
+      } catch {
+        // already gone
+      }
+    }
   };
 
   source.on('error', fail);
@@ -57,7 +87,7 @@ export async function* parseTarStream(
     notify();
   });
 
-  extract.on('entry', (header: TarHeader, body: NodeJS.ReadableStream, next: () => void) => {
+  const onEntry = (header: TarHeader, body: TarBody, next: (err?: Error | null) => void): void => {
     const type = mapType(header.type);
     if (type === null) {
       body.resume();
@@ -129,7 +159,10 @@ export async function* parseTarStream(
 
     queue.push({ entry, body, bodyDone, wasClaimed: () => claimed });
     notify();
-  });
+  };
+  // A streamx Source satisfies every operation TarBody performs at runtime;
+  // the declaration-level mismatch is narrowed here, once.
+  extract.on('entry', onEntry as unknown as never);
 
   if (decompressor) source.pipe(decompressor).pipe(extract);
   else source.pipe(extract);
@@ -164,7 +197,9 @@ export async function* parseTarStream(
         // The body failed on its own or was destroyed by the writer after a
         // failed write. Either way the failure is already typed or must not
         // be re-wrapped here (for example an injected EFBIG/EACCES fs error).
-        throw classifyParseFailure(error);
+        // Prefer the recorded primary failure (upstream truncation) over the
+        // collateral body-close rejection it caused.
+        throw classifyParseFailure(failure ?? error);
       }
     }
     if (failure) throw classifyParseFailure(failure);

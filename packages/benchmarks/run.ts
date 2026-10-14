@@ -24,7 +24,7 @@ import { createGzip } from 'node:zlib';
 import { Readable } from 'node:stream';
 import { fileURLToPath } from 'node:url';
 import { writeFileSync } from 'node:fs';
-import type { Headers } from 'tar-stream';
+import type { Header } from 'tar-stream';
 
 // ---------------------------------------------------------------------------
 // Archive generators
@@ -43,13 +43,13 @@ async function buildTarAsync(
   const pack = tar.pack();
   const drain = (async () => {
     const chunks: Buffer[] = [];
-    for await (const c of pack) chunks.push(c);
+    for await (const c of pack) chunks.push(c as Buffer);
     return Buffer.concat(chunks);
   })();
   for (const e of entries) {
-    const h: Headers = {
+    const h: Partial<Header> & Pick<Header, 'name' | 'type' | 'mode' | 'mtime'> = {
       name: e.name,
-      type: (e.type ?? 'file') as Headers['type'],
+      type: (e.type ?? 'file') as Header['type'],
       mode: e.mode ?? 0o644,
       mtime: new Date(),
     };

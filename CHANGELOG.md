@@ -3,6 +3,74 @@
 All notable changes are documented here. The project follows Keep a Changelog and Semantic
 Versioning.
 
+## [1.0.5] - 2026-10-15
+
+A reliability and release-engineering release. One real defect is fixed, extraction of
+small-file archives is measurably faster, and the recurring CI breakage on dependency PRs is
+gone at the root. No public type signatures changed.
+
+### Fixed
+
+- A TAR compressed with gzip, zstd, or bzip2 and then truncated inside an entry body left
+  `extract()` unsettled forever. Node's decompression streams emit their truncation error on
+  the piped source, but `pipe()` does not forward error events: tar-stream sat idle, the
+  pending entry body never ended, and the consumer parked on the body-drain promise with no
+  active handles left, so the process exited (code 13, unsettled top-level await) without
+  resolving or rejecting. The parser now tears down the whole pipeline with the primary
+  failure when any stream errors, pending bodies reject, and `extract()` settles with the
+  typed truncation error. Plain TAR and ZIP were unaffected. Regression tests cover gz and
+  zst cut at 30, 50, 70, and 90 percent, each asserting the promise settles within a bounded
+  race.
+- `npm audit` reported a critical in the dev tree: `shell-quote` 1.10.0 through
+  `@changesets/cli` -> `launch-editor` (GHSA-pqg4-j6r4-53mv). Never shipped to consumers, but
+  release CI runs `npm audit --audit-level=low`, so the release-readiness job was red. The
+  regenerated lockfile resolves `shell-quote` 1.12.0; the audit is clean.
+
+### Changed
+
+- File mtimes now land via `futimes` while each write handle is open, instead of a deferred
+  post-write pass. One fewer path walk per file, no deferred array, no re-sorting, and an
+  mtime failure now surfaces as that entry's own write error. Directory and symlink mtimes
+  stay deferred (child creation mutates parent timestamps; symlinks are never opened).
+- Case folding for duplicate detection takes a plain `toLowerCase` fast path for ASCII-only
+  paths, skipping the per-entry ICU call that adds up on ten-thousand-entry archives. Results
+  are identical for ASCII; non-ASCII paths still go through `toLocaleLowerCase('en-US')`.
+- The `tar-stream` override pinning 3.2.0 is removed. The pin contradicted the workspace
+  range `^3.2.1`, and that contradiction was the root cause of every failed Dependabot PR:
+  the bot regenerates the lockfile without the nested duplicate the override demands, then
+  `npm ci` fails with `EUSAGE: Missing: tar-stream@3.2.0 from lock file`. The original
+  justification for the pin (a broken `index.d.ts` in 3.2.1) no longer applies: 3.2.2 ships
+  a type surface that compiles once call sites use `Header` and accept streamx `Source`
+  bodies, which this release does. One deduped copy of 3.2.2 now resolves at the root.
+- The `esbuild` and `brace-expansion` security pins changed from exact versions to caret
+  ranges (`^0.28.2`, `^5.0.12`). Exact pins desynced the lockfile on every Dependabot bump
+  to a patched release; ranges keep the floor and let those bumps land inside the override.
+
+### Performance
+
+Warm means, same corpus and 5-run methodology, this machine (2 vCPU, tmp-backed corpus):
+
+- 904-file npm-shaped TAR: 288 ms -> 221 ms
+- 10,000 small files, plain TAR: 2.79 s -> 2.53 s
+- 200 unicode-named files: 86 ms -> 51 ms
+
+The remaining distance to the fastest competitor on tiny archives is their unbounded
+parallel write of fully buffered entries, which costs several times the peak RSS and has no
+atomic commit; the write syscall pattern per file is otherwise at parity.
+
+### Dependencies
+
+- `tar-stream` 3.2.0 (pinned) -> 3.2.2. Dev tree: `eslint` 10.12.0, `prettier` 3.9.10,
+  `typescript-eslint` 8.71.2, `@types/node` 26.6.5. Runtime dependency surface unchanged
+  (`tar-stream`, `yauzl`, `unbzip2-stream`).
+- `tsup` stays on 8.5.1: 9.0.0 shipped the day this release was cut. TypeScript stays on
+  5.9: `typescript-eslint` declares `typescript <6.1.0` and TS 7 is out of scope here.
+- CI installs npm@11.19.0 (matching `packageManager`) in every job so the lockfile is
+  generated, committed, and installed by the same npm major across the Node matrix, and a
+  fast `lockfile-sync` job regenerates the lockfile from the manifests and fails with
+  instructions when a PR leaves them desynced. Dependabot no longer proposes TypeScript
+  major or minor bumps.
+
 ## [1.0.4] - 2026-09-29
 
 A correctness and reliability release. Two real defects are fixed, both found the same week by

@@ -9,6 +9,11 @@ updates:
       timezone: Asia/Kolkata
     commit-message:
       prefix: deps
+    # typescript 6+ is not supported by the pinned typescript-eslint range
+    # (<6.1.0); bumps beyond 5.9.x are taken deliberately with tooling updates.
+    ignore:
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major', 'version-update:semver-minor']
     groups:
       minor-and-patch:
         update-types: [minor, patch]

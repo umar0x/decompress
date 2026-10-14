@@ -29,12 +29,37 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      - name: Use the npm version the lockfile was generated with
+        run: npm install -g npm@11.19.0
       - run: npm ci
       - run: npm run build
       - run: npm run typecheck
       - run: npm run lint
       - run: npm run format:check
       - run: npm run test:nobuild
+
+  lockfile-sync:
+    name: Lockfile in sync with manifests
+    timeout-minutes: 5
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Use the npm version the lockfile was generated with
+        run: npm install -g npm@11.19.0
+      - name: Verify package-lock.json matches package.json
+        run: |
+          cp package-lock.json /tmp/lock-before.json
+          npm install --package-lock-only --ignore-scripts
+          if ! diff -u /tmp/lock-before.json package-lock.json; then
+            echo "::error::package-lock.json is out of sync with the manifests."
+            echo "::error::Regenerate it locally with: npm install --package-lock-only"
+            echo "::error::then commit the updated lockfile with your change."
+            exit 1
+          fi
 
   release-readiness:
     name: Release readiness
@@ -46,6 +71,8 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Use the npm version the lockfile was generated with
+        run: npm install -g npm@11.19.0
       - run: npm ci
       - run: npm run verify:release
       - run: npm run build
@@ -66,6 +93,8 @@ jobs:
         with:
           node-version: '24'
           cache: npm
+      - name: Use the npm version the lockfile was generated with
+        run: npm install -g npm@11.19.0
       - run: npm ci
       - run: npm run build
       - name: Run plugin contract regression suite

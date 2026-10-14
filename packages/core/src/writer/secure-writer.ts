@@ -12,6 +12,7 @@ import {
   safeHardlink,
   safeUnlink,
   safeFchmod,
+  safeFutimes,
 } from './fs-ops.ts';
 import {
   AbortError,
@@ -332,12 +333,18 @@ async function writeFileEntry(
         await safeWriteAll(fh, chunk, ctx.signal);
       }
       await safeFchmod(fh, mode, ctx.signal);
+      // Apply the file's mtime while the handle is open (futimes: no path
+      // walk, no deferred second pass). The staging tree stays invisible
+      // until the atomic rename, so this is externally unobservable, and an
+      // mtime failure now surfaces as the entry's own write error - the
+      // strictest ordering the failure contract allows.
+      if (entry.mtime !== null && entry.mtime !== undefined) {
+        await safeFutimes(fh, entry.mtime, ctx.signal);
+      }
     } finally {
       await safeClose(fh);
     }
 
-    // mtime is applied by the caller in a post-write batch; the staging tree is
-    // invisible until the atomic rename, so deferral is externally unobservable.
     return { kind: 'file', path: dest, mode, bytes, mtime: entry.mtime ?? null };
   } catch (error) {
     destroyClaimedBody(contents, error);
