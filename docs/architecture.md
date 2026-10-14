@@ -60,9 +60,16 @@ normalization (`./` and `/./` are semantically neutral and are stripped, not rej
 checks, duplicate and case-collision checks, option transforms, declared-size limits, and
 permission sanitization. The writer then enforces containment against the staging root: ancestor
 directories are created or verified once on first touch and cached, writes use no-follow/exclusive
-file creation, loops on partial writes, and applies rolling actual-byte limits. File and symlink
-mtimes are applied in bounded batches after all content exists, inside the private staging tree,
-so deferral is externally unobservable before the atomic rename.
+file creation, loops on partial writes, and applies rolling actual-byte limits. File mtimes land
+via `futimes` while each write handle is open (no deferred pass, and an mtime failure surfaces as
+that entry's own write error). Directory and symlink mtimes are applied after all child writes,
+deepest directory first, because child creation mutates parent mtimes; both stay inside the
+private staging tree, so deferral is externally unobservable before the atomic rename.
+
+When a compressed source stream fails mid-extraction (for example a truncated gzip or zstd
+frame), the parser tears down the whole pipeline with the primary failure: pending entry bodies
+are destroyed, parked body-drain awaits reject, and `extract()` settles with a typed
+`TruncatedArchiveError` instead of leaving a promise that never settles.
 
 The staging directory is created as a private sibling of the destination. Keeping it on the same
 filesystem allows rename to be the commit primitive. An `EXDEV` error is returned instead of

@@ -166,8 +166,9 @@ Where this library leads: every many-small-files scenario, deep trees, concurren
 deflate-heavy single files, and peak memory on large files (3 to 8 times lower than the buffered
 competition). Where the competition leads: @xhmikosr/decompress is 30 to 65 ms faster on
 uncompressed 128 MiB TAR and a few milliseconds faster on tiny archives, which is the price of
-atomic staging and per-entry policy validation. decompress 4.2.1 trails everywhere and hangs on
-entry names 4096 characters long.
+atomic staging and per-entry policy validation. decompress 4.2.1 trails everywhere, and a
+4096-character entry name fails there with a raw ENAMETOOLONG where this library rejects it as a
+typed path-policy error before touching the filesystem.
 
 A 60-level tree of 0644-mode directories is worth calling out because it is a 1.0.4 fix: on
 1.0.3 that archive never finished extracting at all.
