@@ -7,7 +7,7 @@ import { test } from 'node:test';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import nodePath from 'node:path';
-import { createGzip, createZstdCompress } from 'node:zlib';
+import { createZstdCompress } from 'node:zlib';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { extract } from '../../src/index.ts';
 import { checkCaseCollision } from '../../src/writer/path-security.ts';
@@ -65,9 +65,7 @@ async function settleWithin(
 
 for (const cut of [0.3, 0.5, 0.7, 0.9]) {
   test(`1.0.5: tar.gz truncated at ${Math.round(cut * 100)}% settles with a typed error`, async () => {
-    const whole = await gzipBuffer(
-      await buildTarBuffer([{ name: 'blob.bin', content: PAYLOAD }]),
-    );
+    const whole = await gzipBuffer(await buildTarBuffer([{ name: 'blob.bin', content: PAYLOAD }]));
     const truncated = whole.subarray(0, Math.floor(whole.length * cut));
     const out = nodePath.join(target, `gz-${cut}`);
     const outcome = await settleWithin(extract(truncated, out), 10_000);
@@ -82,9 +80,7 @@ for (const cut of [0.3, 0.5, 0.7, 0.9]) {
   });
 
   test(`1.0.5: tar.zst truncated at ${Math.round(cut * 100)}% settles with a typed error`, async () => {
-    const whole = await zstdBuffer(
-      await buildTarBuffer([{ name: 'blob.bin', content: PAYLOAD }]),
-    );
+    const whole = await zstdBuffer(await buildTarBuffer([{ name: 'blob.bin', content: PAYLOAD }]));
     const truncated = whole.subarray(0, Math.floor(whole.length * cut));
     const out = nodePath.join(target, `zst-${cut}`);
     const outcome = await settleWithin(extract(truncated, out), 10_000);
@@ -160,17 +156,26 @@ test('1.0.5: ASCII case folding fast path matches ICU folding exactly', () => {
   }
 });
 
-test('1.0.5: non-ASCII case-collision integration (case-insensitive platforms only)', { skip: process.platform !== 'darwin' && process.platform !== 'win32' ? 'case-sensitive filesystem' : false }, async () => {
-  const archive = await buildTarBuffer([
-    { name: 'Ärger.txt', content: 'a' },
-    { name: 'ärger.txt', content: 'b' },
-  ]);
-  const out = nodePath.join(target, 'case-unicode');
-  await assert.rejects(extract(archive, out), (e: unknown) => {
-    assert.equal((e as Error).name, 'CaseCollisionError');
-    return true;
-  });
-});
+test(
+  '1.0.5: non-ASCII case-collision integration (case-insensitive platforms only)',
+  {
+    skip:
+      process.platform !== 'darwin' && process.platform !== 'win32'
+        ? 'case-sensitive filesystem'
+        : false,
+  },
+  async () => {
+    const archive = await buildTarBuffer([
+      { name: 'Ärger.txt', content: 'a' },
+      { name: 'ärger.txt', content: 'b' },
+    ]);
+    const out = nodePath.join(target, 'case-unicode');
+    await assert.rejects(extract(archive, out), (e: unknown) => {
+      assert.equal((e as Error).name, 'CaseCollisionError');
+      return true;
+    });
+  },
+);
 
 async function zstdBuffer(buf: Buffer): Promise<Buffer> {
   const { pipeline } = await import('node:stream/promises');

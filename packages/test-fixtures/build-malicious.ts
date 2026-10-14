@@ -13,7 +13,7 @@ const fixtureTime = new Date('2026-01-01T00:00:00.000Z');
 
 type TarFixtureEntry = {
   name: string;
-  type?: tar.Headers['type'];
+  type?: 'file' | 'directory' | 'symlink' | 'link';
   mode?: number;
   linkname?: string;
   content?: Buffer | string;
@@ -23,7 +23,8 @@ async function buildTar(entries: TarFixtureEntry[]): Promise<Buffer> {
   const pack = tar.pack();
   const drain = (async () => {
     const chunks: Buffer[] = [];
-    for await (const chunk of pack) chunks.push(Buffer.from(chunk));
+    for await (const chunk of pack as unknown as AsyncIterable<Buffer>)
+      chunks.push(Buffer.from(chunk));
     return Buffer.concat(chunks);
   })();
 
@@ -38,7 +39,7 @@ async function buildTar(entries: TarFixtureEntry[]): Promise<Buffer> {
           type: entry.type ?? 'file',
           mode: entry.mode ?? 0o644,
           mtime: fixtureTime,
-          linkname: entry.linkname,
+          linkname: entry.linkname ?? '',
           size:
             entry.type === 'directory' || entry.type === 'symlink' || entry.type === 'link'
               ? 0

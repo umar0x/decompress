@@ -13,7 +13,7 @@ export type TarEntrySpec = {
   mode?: number;
   mtime?: Date;
   linkname?: string;
-  content?: Buffer;
+  content?: Buffer | string;
 };
 
 /** Build a raw (uncompressed) TAR buffer from entry specs. */
@@ -25,7 +25,8 @@ export async function buildTarBuffer(entries: TarEntrySpec[]): Promise<Buffer> {
     return Buffer.concat(chunks);
   })();
   for (const e of entries) {
-    const content = e.content ?? Buffer.alloc(0);
+    const content =
+      typeof e.content === 'string' ? Buffer.from(e.content) : (e.content ?? Buffer.alloc(0));
     const type = e.type ?? 'file';
     const isMeta = type === 'directory' || type === 'symlink' || type === 'link';
     await new Promise<void>((resolve, reject) => {

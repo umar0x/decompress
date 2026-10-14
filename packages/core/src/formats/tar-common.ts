@@ -17,6 +17,12 @@ type TarHeader = {
   linkname?: string;
 };
 
+// tar-stream 3.2.2 hands entry bodies as streamx Sources. A Source is a
+// Node-Readable-compatible object for every operation this parser performs
+// (resume, once, destroy, async iteration); the type-level mismatch is only
+// in optional Node streams fields, so it is narrowed once, at storage.
+type TarBody = NodeJS.ReadableStream;
+
 type QueuedEntry = {
   entry: ArchiveEntry;
   body: NodeJS.ReadableStream;
@@ -81,7 +87,7 @@ export async function* parseTarStream(
     notify();
   });
 
-  extract.on('entry', (header: TarHeader, body: NodeJS.ReadableStream, next: () => void) => {
+  const onEntry = (header: TarHeader, body: TarBody, next: (err?: Error | null) => void): void => {
     const type = mapType(header.type);
     if (type === null) {
       body.resume();
@@ -153,7 +159,10 @@ export async function* parseTarStream(
 
     queue.push({ entry, body, bodyDone, wasClaimed: () => claimed });
     notify();
-  });
+  };
+  // A streamx Source satisfies every operation TarBody performs at runtime;
+  // the declaration-level mismatch is narrowed here, once.
+  extract.on('entry', onEntry as unknown as never);
 
   if (decompressor) source.pipe(decompressor).pipe(extract);
   else source.pipe(extract);
