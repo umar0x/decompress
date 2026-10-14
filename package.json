@@ -6,7 +6,7 @@
   "author": "umar0x <hello@umar.ac>",
   "license": "MIT",
   "type": "module",
-  "packageManager": "npm@11.17.0",
+  "packageManager": "npm@11.19.0",
   "workspaces": [
     "packages/*"
   ],
