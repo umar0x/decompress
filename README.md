@@ -149,29 +149,42 @@ Exit codes are `0` for success, `1` for an extraction/policy error or a high/cri
 ## Performance
 
 Measured on a 2-vCPU Linux host, Node 24.21, one corpus built once and shared by all three
-libraries, five timed runs per scenario interleaved round-robin after a warmup (medians below;
-raw runs with mean, standard deviation, min, and max ship with the release):
+libraries, five fresh child processes per scenario with warmup runs, all three libraries
+executed back to back in the same session (warm means below; per-run raw data with medians,
+standard deviation, min, and max is preserved alongside the release):
 
-| Scenario (median)          | this library | decompress 4.2.1 | @xhmikosr/decompress 11.1.4 |
-| -------------------------- | -----------: | ---------------: | --------------------------: |
-| ZIP, 5000 files x 1 KiB    |        2.7 s |            5.8 s |                       2.9 s |
-| TAR.GZ, 5000 files x 1 KiB |        1.6 s |            6.0 s |                       2.3 s |
-| ZIP, 1 x 128 MiB (deflate) |       509 ms |           557 ms |                      635 ms |
-| TAR, 1 x 128 MiB           |       220 ms |           340 ms |                      155 ms |
-| 60-level tree, 0644 dirs   |        96 ms |          3280 ms |                      771 ms |
-| 8 parallel ZIP extractions |        1.7 s |            4.6 s |                       2.4 s |
-| Peak RSS, 1 x 128 MiB TAR  |       84 MiB |          702 MiB |                     323 MiB |
+| Scenario (warm mean)               | this library | decompress 4.2.1 | @xhmikosr/decompress 11.1.4 |
+| ---------------------------------- | -----------: | ---------------: | --------------------------: |
+| ZIP, 10,000 small files            |       4.31 s |           7.20 s |                      5.67 s |
+| TAR.GZ, 10,000 small files         |       2.88 s |           7.25 s |                      3.75 s |
+| TAR, 10,000 small files            |       2.80 s |           7.15 s |                      3.46 s |
+| ZIP, 1 x 64 MiB (deflate)          |       338 ms |           385 ms |                      393 ms |
+| TAR.GZ, 1 x 64 MiB                 |       354 ms |           392 ms |                      396 ms |
+| 64-level nested tree               |       100 ms |           1.53 s |                      310 ms |
+| Unicode names, 200 files           |        58 ms |           136 ms |                      101 ms |
+| npm-package-shaped TAR (904 files) |       427 ms |           594 ms |                      335 ms |
+| TAR, 1 x 64 MiB (uncompressed)     |        72 ms |           160 ms |                       92 ms |
+| Peak RSS, 64 MiB single-file TAR   |       84 MiB |          638 MiB |                     259 MiB |
+| Peak RSS, 10,000-file TAR          |      205 MiB |          523 MiB |                     330 MiB |
 
-Where this library leads: every many-small-files scenario, deep trees, concurrent extraction,
-deflate-heavy single files, and peak memory on large files (3 to 8 times lower than the buffered
-competition). Where the competition leads: @xhmikosr/decompress is 30 to 65 ms faster on
-uncompressed 128 MiB TAR and a few milliseconds faster on tiny archives, which is the price of
-atomic staging and per-entry policy validation. decompress 4.2.1 trails everywhere, and a
-4096-character entry name fails there with a raw ENAMETOOLONG where this library rejects it as a
-typed path-policy error before touching the filesystem.
+Where this library leads: every many-small-files scenario across all archive formats, deep
+trees, unicode filenames, deflate-heavy single files, uncompressed TAR, and peak memory on
+every large scenario (2.5 to 7.6 times lower than the buffered competition). Where the
+competition leads: @xhmikosr/decompress is about 25 percent faster on a 904-file
+npm-shaped TAR, because it buffers every entry fully in memory and writes with unbounded
+parallelism (no atomic commit), and about 30 percent faster on TAR.BZ2, where both
+competitors decode the whole bzip2 stream into RAM with seek-bzip before any limit can act
+on it. A 64 MiB bzip2 bomb shaped the same way is rejected by the default compression-ratio
+limit here while both competitors materialize the full expansion.
+
+@xhmikosr/decompress and decompress report success with zero extracted files on formats they
+do not support (XZ, Zstandard): every plugin declines the magic bytes and the concatenated
+result is an empty success. This library reports a typed `UnknownFormatError` instead.
 
 A 60-level tree of 0644-mode directories is worth calling out because it is a 1.0.4 fix: on
-1.0.3 that archive never finished extracting at all.
+1.0.3 that archive never finished extracting at all. A 1.0.5 fix in the same family: a
+truncated gzip, zstd, or bzip2 TAR now settles `extract()` with a typed
+`TruncatedArchiveError` where 1.0.4 could leave the promise unsettled forever.
 
 ## Formats and dependencies
 
