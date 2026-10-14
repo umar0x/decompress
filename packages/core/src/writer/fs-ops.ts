@@ -180,3 +180,16 @@ export async function ensureNotSymlink(p: string, signal?: AbortSignal): Promise
 }
 
 export { O_NOFOLLOW, O_EXCL };
+
+/**
+ * Apply mtime to an open file handle (futimes): no path resolution, and the
+ * timestamp lands before the handle closes so no deferred pass is needed.
+ */
+export async function safeFutimes(
+  fh: { utimes: (atime: Date, mtime: Date) => Promise<void> },
+  mtime: Date,
+  signal?: AbortSignal,
+): Promise<void> {
+  checkAbort(signal);
+  await fh.utimes(mtime, mtime);
+}

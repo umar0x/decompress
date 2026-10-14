@@ -227,7 +227,15 @@ export async function atomicExtract(
     const r = await writeEntry(entry, entryCtx);
     for (const warning of ctx.warnings.slice(warningStart)) opts.onWarning?.(warning);
     results[originalIndex] = r;
-    if (r.kind !== 'hardlink' && r.mtime !== null && r.mtime !== undefined) {
+    // File mtimes already landed via futimes while each handle was open.
+    // Only directory and symlink mtimes are deferred: child creation mutates
+    // directory timestamps, and symlinks are never opened (lutimes).
+    if (
+      r.kind !== 'hardlink' &&
+      r.mtime !== null &&
+      r.mtime !== undefined &&
+      (r.kind === 'directory' || r.kind === 'symlink')
+    ) {
       deferredMtimes.push({ path: r.path, mtime: r.mtime, type: r.kind, order: originalIndex });
     }
     processedCount++;
@@ -366,7 +374,7 @@ export async function atomicExtract(
     //      (0644/0444/0000) is applied only after every utime has landed,
     //      because path resolution for the earlier phases needs +x on every
     //      ancestor. Deepest first so each chmod's ancestors are still 0700.
-    const fileMtimes = deferredMtimes.filter((m) => m.type !== 'directory');
+    const fileMtimes = deferredMtimes.filter((m) => m.type === 'symlink');
     const dirMtimes = deferredMtimes
       .filter((m) => m.type === 'directory')
       .sort((a, b) => pathDepth(b.path) - pathDepth(a.path));

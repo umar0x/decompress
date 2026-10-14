@@ -21,6 +21,9 @@ export const NTFS_ADS_REGEX = /:[^/\\]/;
 
 const MAX_PATH_LEN = 4096;
 
+// Fast test for pure-ASCII paths (case folding can skip ICU for these).
+const ASCII_ONLY = /^[\x00-\x7f]*$/;
+
 /**
  * Remove no-op '.' path segments (leading './' and interior '/./'). Dot
  * segments are semantically neutral, so stripping them before validation lets
@@ -219,8 +222,12 @@ export function checkCaseCollision(
 ): 'new' | 'skip' | 'overwrite' {
   if (!caseInsensitive) return 'new';
 
-  // A fixed locale keeps case folding deterministic across hosts.
-  const folded = normalized.toLocaleLowerCase('en-US');
+  // A fixed locale keeps case folding deterministic across hosts. ASCII-only
+  // paths take the plain lowercasing fast path: identical results for ASCII,
+  // without the ICU round-trip that dominates per-entry cost on large archives.
+  const folded = ASCII_ONLY.test(normalized)
+    ? normalized.toLowerCase()
+    : normalized.toLocaleLowerCase('en-US');
   const existing = seen.get(folded);
   if (existing === undefined) {
     seen.set(folded, normalized);
