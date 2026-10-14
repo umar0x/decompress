@@ -33,7 +33,7 @@ updates:
     groups:
       codeql-action:
         patterns:
-          - "github/codeql-action"
+          - 'github/codeql-action'
         update-types:
           - minor
           - patch
