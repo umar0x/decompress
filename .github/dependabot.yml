@@ -26,3 +26,14 @@ updates:
       timezone: Asia/Kolkata
     commit-message:
       prefix: ci
+    # CodeQL's init and analyze steps must run the same action version: a
+    # workflow that mixes them fails with 'Loaded a configuration file for
+    # version X, but running version Y'. Bumping them as separate PRs
+    # guarantees that mismatch, so they move as one grouped update.
+    groups:
+      codeql-action:
+        patterns:
+          - 'github/codeql-action'
+        update-types:
+          - minor
+          - patch
