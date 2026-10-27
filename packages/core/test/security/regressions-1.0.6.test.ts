@@ -97,13 +97,31 @@ test('1.0.6: created files carry their sanitized final mode', async () => {
 
     await extract(archive, output);
 
-    const umask = process.umask();
-    assert.equal((await stat(nodePath.join(output, 'plain.txt'))).mode & 0o777, 0o644 & ~umask);
-    assert.equal((await stat(nodePath.join(output, 'exec.sh'))).mode & 0o777, 0o755 & ~umask);
-    // 0o777 without preservePermissions is capped by the default policy.
-    assert.equal((await stat(nodePath.join(output, 'writable.txt'))).mode & 0o777, 0o755 & ~umask);
-    // setuid is always stripped; execute bit preserved.
-    assert.equal((await stat(nodePath.join(output, 'setuid.bin'))).mode & 0o777, 0o755 & ~umask);
+    const plain = await stat(nodePath.join(output, 'plain.txt'));
+    const exec = await stat(nodePath.join(output, 'exec.sh'));
+    const writable = await stat(nodePath.join(output, 'writable.txt'));
+    const setuid = await stat(nodePath.join(output, 'setuid.bin'));
+
+    // Special bits never survive, on any platform.
+    for (const st of [plain, exec, writable, setuid]) {
+      assert.equal(st.mode & 0o7000, 0, 'setuid/setgid/sticky must be stripped');
+    }
+
+    if (process.platform === 'win32') {
+      // Windows can only represent writable vs read-only; every sanitized
+      // mode here keeps the write bit, and read-only would mean 0o444.
+      for (const st of [plain, exec, writable, setuid]) {
+        assert.equal(st.mode & 0o222, 0o222, 'writable files must stay writable');
+      }
+    } else {
+      const umask = process.umask();
+      assert.equal(plain.mode & 0o777, 0o644 & ~umask);
+      assert.equal(exec.mode & 0o777, 0o755 & ~umask);
+      // 0o777 without preservePermissions is capped by the default policy.
+      assert.equal(writable.mode & 0o777, 0o755 & ~umask);
+      // setuid is always stripped; execute bit preserved.
+      assert.equal(setuid.mode & 0o777, 0o755 & ~umask);
+    }
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
