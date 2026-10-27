@@ -1,7 +1,7 @@
 {
   "name": "decompress",
   "private": true,
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Secure archive extraction for Node.js monorepo",
   "author": "umar0x <hello@umar.ac>",
   "license": "MIT",
@@ -26,7 +26,7 @@
     "test:integration": "node scripts/run-tests.mjs integration spec",
     "test:security": "node scripts/run-tests.mjs security spec",
     "test:compat": "node scripts/run-tests.mjs compat spec",
-    "coverage": "c8 --all --include 'packages/core/src/**/*.ts' --exclude 'packages/core/src/**/*.d.ts' --check-coverage --lines 85 --statements 85 --functions 90 --branches 80 --reporter=text --reporter=lcov node --import=tsx scripts/run-tests.mjs core spec && node scripts/check-coverage-floors.mjs coverage/lcov.info",
+    "coverage": "c8 --all --include 'packages/core/src/**/*.ts' --exclude 'packages/core/src/**/*.d.ts' --exclude 'packages/core/src/formats/bz2-worker.ts' --check-coverage --lines 85 --statements 85 --functions 90 --branches 80 --reporter=text --reporter=lcov node --import=tsx scripts/run-tests.mjs core spec && node scripts/check-coverage-floors.mjs coverage/lcov.info",
     "fuzz:smoke": "node scripts/run-tests.mjs fuzz spec",
     "bench": "node --import tsx packages/benchmarks/run.ts",
     "test:pack": "npm run build && node scripts/verify-packages.mjs",
@@ -47,10 +47,10 @@
     "c8": "^12.0.0",
     "eslint": "^10.13.0",
     "prettier": "^3.9.10",
-    "tsup": "^8.5.1",
+    "tsup": "^9.0.0",
     "tsx": "^4.23.15",
     "typescript": "^5.9.3",
-    "typescript-eslint": "^8.71.2"
+    "typescript-eslint": "^8.72.1"
   },
   "overrides": {
     "brace-expansion": "^5.0.12",

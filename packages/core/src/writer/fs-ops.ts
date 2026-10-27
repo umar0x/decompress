@@ -11,6 +11,7 @@ import {
   lutimes,
   readlink,
   unlink,
+  chmod,
 } from 'node:fs/promises';
 import { constants } from 'node:fs';
 import { AbortError, NotADirectoryError } from '../errors.ts';
@@ -150,18 +151,8 @@ export async function safeLutimes(p: string, mtime: Date, signal?: AbortSignal):
   }
 }
 
-export async function safeFchmod(
-  fh: { chmod: (m: number) => Promise<void> },
-  mode: number,
-  signal?: AbortSignal,
-): Promise<void> {
-  checkAbort(signal);
-  await fh.chmod(mode);
-}
-
 export async function safeChmod(p: string, mode: number, signal?: AbortSignal): Promise<void> {
   checkAbort(signal);
-  const { chmod } = await import('node:fs/promises');
   await chmod(p, mode);
 }
 

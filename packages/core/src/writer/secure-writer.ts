@@ -11,7 +11,6 @@ import {
   safeSymlink,
   safeHardlink,
   safeUnlink,
-  safeFchmod,
   safeFutimes,
 } from './fs-ops.ts';
 import {
@@ -302,10 +301,14 @@ async function writeFileEntry(
     });
 
     // Exclusive creation with O_NOFOLLOW (refuses to follow a final-component
-    // symlink) and O_EXCL (refuses to clobber an existing path).
+    // symlink) and O_EXCL (refuses to clobber an existing path). The file is
+    // created with its final mode directly: sanitizeMode already applied the
+    // umask, and the staging root is 0700-private to this process, so there is
+    // no window where a not-yet-complete file is visible at its final mode.
+    // One syscall fewer than open-then-fchmod per file.
     let fh;
     try {
-      fh = await safeOpenExclusive(dest, 0o600, ctx.signal);
+      fh = await safeOpenExclusive(dest, mode, ctx.signal);
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code === 'EEXIST') {
@@ -314,7 +317,7 @@ async function writeFileEntry(
           const st = await safeLstat(dest, ctx.signal);
           if (st.isSymbolicLink()) throw new LinkThroughSymlinkError(`symlink at dest: ${dest}`);
           await safeUnlink(dest, ctx.signal);
-          fh = await safeOpenExclusive(dest, 0o600, ctx.signal);
+          fh = await safeOpenExclusive(dest, mode, ctx.signal);
         } else {
           throw new OutputExistsError(`refusing to overwrite existing file: ${dest}`);
         }
@@ -332,7 +335,6 @@ async function writeFileEntry(
         enforceRollingLimits(entry.path, bytes, chunk.length, ctx);
         await safeWriteAll(fh, chunk, ctx.signal);
       }
-      await safeFchmod(fh, mode, ctx.signal);
       // Apply the file's mtime while the handle is open (futimes: no path
       // walk, no deferred second pass). The staging tree stays invisible
       // until the atomic rename, so this is externally unobservable, and an

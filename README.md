@@ -6,13 +6,19 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A522-green.svg?style=flat-square)](https://nodejs.org/en/about/previous-releases)
 
-Secure, bounded archive extraction for Node.js 22+. ZIP, TAR, TAR.GZ, TAR.BZ2, and TAR.ZST,
-with ESM and CommonJS builds.
+Secure, fast archive extraction for Node.js 22+. ZIP, TAR, TAR.GZ, TAR.BZ2, and TAR.ZST,
+with parallel bzip2 decoding, ESM and CommonJS builds, and a zero-runtime-dependency install:
+one package, no transitive tree.
 
 I built this because the two packages most of the ecosystem still relies on for archive
 extraction are either unmaintained or carry a lineage of extraction vulnerabilities, and I wanted
 a default that survives hostile input. Every default here is chosen for that case: untrusted
 archives, safe by construction, with limits you can tune.
+
+`decompress` (the original) has no fix available for CVE-2026-53486 (path traversal via link
+targets, CVSS 9.1); `@xhmikosr/decompress` patched it in 11.1.3. Neither caps archive size, entry
+count, or expansion ratio, and both report success with zero extracted files on formats they do
+not recognize. This library treats those shapes as typed errors.
 
 The native `@umar0x/decompress` API is the product. `@umar0x/decompress-compatible` exists as a
 migration bridge for code that cannot change its call shape yet.
@@ -148,55 +154,60 @@ Exit codes are `0` for success, `1` for an extraction/policy error or a high/cri
 
 ## Performance
 
-Measured on a 2-vCPU Linux host, Node 24.21, one corpus built once and shared by all three
-libraries, five fresh child processes per scenario with warmup runs, all three libraries
-executed back to back in the same session (warm means below; per-run raw data with medians,
-standard deviation, min, and max is preserved alongside the release):
+Measured on a 2-vCPU Linux host, Node 24, one corpus built once and shared by all three
+libraries, five timed runs per scenario per library in one clean session, all three libraries
+executed back to back (warm medians below; per-run raw data with medians, standard deviation,
+min, and max is preserved alongside each release):
 
-| Scenario (warm mean)               | this library | decompress 4.2.1 | @xhmikosr/decompress 11.1.4 |
-| ---------------------------------- | -----------: | ---------------: | --------------------------: |
-| ZIP, 10,000 small files            |       4.31 s |           7.20 s |                      5.67 s |
-| TAR.GZ, 10,000 small files         |       2.88 s |           7.25 s |                      3.75 s |
-| TAR, 10,000 small files            |       2.80 s |           7.15 s |                      3.46 s |
-| ZIP, 1 x 64 MiB (deflate)          |       338 ms |           385 ms |                      393 ms |
-| TAR.GZ, 1 x 64 MiB                 |       354 ms |           392 ms |                      396 ms |
-| 64-level nested tree               |       100 ms |           1.53 s |                      310 ms |
-| Unicode names, 200 files           |        58 ms |           136 ms |                      101 ms |
-| npm-package-shaped TAR (904 files) |       427 ms |           594 ms |                      335 ms |
-| TAR, 1 x 64 MiB (uncompressed)     |        72 ms |           160 ms |                       92 ms |
-| Peak RSS, 64 MiB single-file TAR   |       84 MiB |          638 MiB |                     259 MiB |
-| Peak RSS, 10,000-file TAR          |      205 MiB |          523 MiB |                     330 MiB |
+| Scenario (warm median)              | this library | decompress 4.2.1 | @xhmikosr/decompress 11.1.4 |
+| ----------------------------------- | -----------: | ---------------: | --------------------------: |
+| ZIP, 10,000 small files             |       2.92 s |          11.06 s |                      4.59 s |
+| TAR.GZ, 10,000 small files          |       2.23 s |          12.24 s |                      3.73 s |
+| TAR.BZ2, 10,000 small files         |       3.15 s |          12.68 s |                      4.23 s |
+| ZIP, 1 x 64 MiB (deflate)           |       183 ms |           222 ms |                      279 ms |
+| TAR.BZ2, 1 x 64 MiB                 |       2.59 s |           2.96 s |                      3.06 s |
+| 64-level nested tree                |        24 ms |           859 ms |                      232 ms |
+| Unicode names, 200 files            |        73 ms |           161 ms |                       80 ms |
+| npm-package-shaped TAR (1054 files) |       230 ms |          1017 ms |                      246 ms |
+| TAR, 1 x 64 MiB (uncompressed)      |        69 ms |           183 ms |                       91 ms |
+| Peak RSS, 64 MiB single-file TAR    |       81 MiB |          183 MiB |                      91 MiB |
+| Peak RSS, 10,000-file TAR.GZ        |      136 MiB |          397 MiB |                     286 MiB |
 
-Where this library leads: every many-small-files scenario across all archive formats, deep
-trees, unicode filenames, deflate-heavy single files, uncompressed TAR, and peak memory on
-every large scenario (2.5 to 7.6 times lower than the buffered competition). Where the
-competition leads: @xhmikosr/decompress is about 25 percent faster on a 904-file
-npm-shaped TAR, because it buffers every entry fully in memory and writes with unbounded
-parallelism (no atomic commit), and about 30 percent faster on TAR.BZ2, where both
-competitors decode the whole bzip2 stream into RAM with seek-bzip before any limit can act
-on it. A 64 MiB bzip2 bomb shaped the same way is rejected by the default compression-ratio
-limit here while both competitors materialize the full expansion.
+Versus 1.0.5 itself: single-large-file bzip2 drops 41 percent (the new parallel block decoder),
+deep-tree extraction drops 26 percent, and peak memory on many-small-file bzip2 drops 32 percent;
+other scenarios are within this host's run-to-run noise. Install weight drops from 7256 KB across
+20 packages to 732 KB in one package.
 
-@xhmikosr/decompress and decompress report success with zero extracted files on formats they
+`decompress` and `@xhmikosr/decompress` report success with zero extracted files on formats they
 do not support (XZ, Zstandard): every plugin declines the magic bytes and the concatenated
-result is an empty success. This library reports a typed `UnknownFormatError` instead.
+result is an empty success. This library reports a typed `UnknownFormatError` instead. Under a
+3 GiB zip bomb both competitors die on an out-of-memory heap; this library rejects the archive by
+the default total-size limit. `decompress` 4.2.1 remains unpatched for CVE-2026-53486 (path
+traversal via link targets); during this release's adversarial testing its prefix-based
+containment was defeated live by a symlink planted next to a sibling directory, writing a file
+outside the output. `@xhmikosr/decompress` patched that class in 11.1.3.
 
 A 60-level tree of 0644-mode directories is worth calling out because it is a 1.0.4 fix: on
 1.0.3 that archive never finished extracting at all. A 1.0.5 fix in the same family: a
 truncated gzip, zstd, or bzip2 TAR now settles `extract()` with a typed
-`TruncatedArchiveError` where 1.0.4 could leave the promise unsettled forever.
+`TruncatedArchiveError` where 1.0.4 could leave the promise unsettled forever. A 1.0.6 fix in
+the same family: an archive rejected for exceeding `maxDepth` no longer leaves its staging
+directory behind (the cleanup walk previously stopped at 64 levels while the tree could be 128
+deep).
 
 ## Formats and dependencies
 
-| Format  | Detection                   | Parser                                              |
-| ------- | --------------------------- | --------------------------------------------------- |
-| ZIP     | `PK` signatures             | `yauzl`                                             |
-| TAR     | `ustar` header              | `tar-stream`                                        |
-| TAR.GZ  | gzip signature              | `node:zlib` + `tar-stream`                          |
-| TAR.BZ2 | `BZh` signature             | `unbzip2-stream` + `tar-stream`                     |
-| TAR.ZST | Zstd frame magic (RFC 8478) | `node:zlib` (`createZstdDecompress`) + `tar-stream` |
+| Format  | Detection                   | Parser                                                                                |
+| ------- | --------------------------- | ------------------------------------------------------------------------------------- |
+| ZIP     | `PK` signatures             | `yauzl`                                                                               |
+| TAR     | `ustar` header              | `tar-stream`                                                                          |
+| TAR.GZ  | gzip signature              | `node:zlib` + `tar-stream`                                                            |
+| TAR.BZ2 | `BZh` signature             | parallel block decode (`seek-bzip` workers) with sequential `unbzip2-stream` fallback |
+| TAR.ZST | Zstd frame magic (RFC 8478) | `node:zlib` (`createZstdDecompress`) + `tar-stream`                                   |
 
-Runtime dependencies: `yauzl`, `tar-stream`, and `unbzip2-stream`. TAR.ZST relies on
+The parsers are bundled into the published artifact: installing `@umar0x/decompress` adds one
+package and no transitive dependencies (732 KB installed, versus 2.4 MB across 38 packages for
+`@xhmikosr/decompress` and 3.9 MB across 77 packages for `decompress`). TAR.ZST relies on
 `node:zlib.createZstdDecompress`, which is Stable as of Node 22.15; on older runtimes the
 format reports as unknown and surfaces a typed runtime error if a caller bypasses detection.
 Encrypted archives, RAR, 7z, and XZ/LZMA are not supported.

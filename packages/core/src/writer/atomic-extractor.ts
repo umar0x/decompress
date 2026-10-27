@@ -1,6 +1,6 @@
 import nodePath from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { mkdir, realpath, rename, rm, rmdir, lstat } from 'node:fs/promises';
+import { mkdir, realpath, rename, rm, rmdir, lstat, readdir } from 'node:fs/promises';
 import type { ArchiveEntry, Limits, PathCtx, Warning } from '../types.ts';
 import { writeEntry, type WriteContext, type EntryResult } from './secure-writer.ts';
 import { applyMtime } from './permissions.ts';
@@ -29,39 +29,63 @@ function isTempDir(name: string): boolean {
 }
 
 /**
- * Bounded recursive delete that does not follow symlinks.
+ * Iterative recursive delete that never follows symlinks.
+ *
+ * The walk is post-order and depth-unbounded: the staging tree's depth is
+ * bounded upstream by path validation (maxDepth), so an unbounded walk cannot
+ * run away, and capping it here leaks staging trees whenever maxDepth exceeds
+ * the cap. That was the 1.0.5 defect: a 129-deep archive rejected for depth
+ * left its 129-deep staging directory behind because cleanup stopped at 64
+ * levels and the rmdir failures were swallowed. Never throws; the caller
+ * verifies removal.
  */
-export async function boundedRimraf(target: string, maxDepth = 64): Promise<void> {
-  if (maxDepth <= 0) return;
-  let st;
-  try {
-    st = await lstat(target);
-  } catch {
-    return; // already gone
-  }
-  if (st.isDirectory() && !st.isSymbolicLink()) {
-    const { readdir } = await import('node:fs/promises');
-    const children = await readdir(target);
-    for (const child of children) {
-      await boundedRimraf(nodePath.join(target, child), maxDepth - 1);
+export async function boundedRimraf(target: string): Promise<void> {
+  type Frame = { path: string; expanded: boolean };
+  const stack: Frame[] = [{ path: target, expanded: false }];
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1]!;
+    if (!frame.expanded) {
+      frame.expanded = true;
+      let st;
+      try {
+        st = await lstat(frame.path);
+      } catch {
+        stack.pop();
+        continue;
+      }
+      if (st.isDirectory() && !st.isSymbolicLink()) {
+        let children: string[];
+        try {
+          children = await readdir(frame.path);
+        } catch {
+          children = [];
+        }
+        if (children.length > 0) {
+          for (const child of children) {
+            stack.push({ path: nodePath.join(frame.path, child), expanded: false });
+          }
+          continue;
+        }
+      }
     }
+    // Children are all processed (or the node is a file, symlink, or gone):
+    // remove it. A failed rmdir leaves this frame for the caller's final
+    // existence check rather than being silently swallowed.
+    stack.pop();
     try {
-      await rmdir(target);
+      const st = await lstat(frame.path);
+      if (st.isDirectory() && !st.isSymbolicLink()) await rmdir(frame.path);
+      else await rm(frame.path, { force: true });
     } catch {
-      // Cleanup must not hide the extraction error.
-    }
-  } else {
-    try {
-      await rm(target, { force: true });
-    } catch {
-      // Cleanup must not hide the extraction error.
+      // Removal raced or failed; cleanupTempDir reports the leftover.
     }
   }
 }
 
 /**
  * Recursively delete the temp directory. Best-effort: never throws (a cleanup failure
- * must not mask the original extraction failure).
+ * must not mask the original extraction failure), but a leftover staging tree is
+ * always reported so it cannot fail silently.
  */
 export async function cleanupTempDir(tempRoot: string): Promise<void> {
   // Never recursively remove a path that was not created by this extractor.
@@ -76,6 +100,15 @@ export async function cleanupTempDir(tempRoot: string): Promise<void> {
       `decompress: FAILED to clean up temp dir ${tempRoot}. ` +
         `Manual removal required. Original error: ${(e as Error).message}`,
     );
+    return;
+  }
+  try {
+    await lstat(tempRoot);
+    console.error(
+      `decompress: FAILED to clean up temp dir ${tempRoot}. ` + `Manual removal required.`,
+    );
+  } catch {
+    // Removed: the expected outcome.
   }
 }
 
@@ -137,7 +170,6 @@ export async function atomicExtract(
     }
     // It's a directory. If non-empty and overwrite is false, refuse.
     if (!opts.policy.overwrite) {
-      const { readdir } = await import('node:fs/promises');
       const children = await readdir(requestedOutput);
       if (children.length > 0) {
         throw new OutputExistsError(
@@ -488,13 +520,11 @@ async function atomicRename(
   }
 
   // Check whether an existing destination is empty.
-  const { readdir } = await import('node:fs/promises');
   const children = await readdir(dest);
   const isEmpty = children.length === 0;
 
   if (isEmpty) {
     // Remove an empty destination before renaming staging into place.
-    const { rmdir } = await import('node:fs/promises');
     try {
       await rmdir(dest);
     } catch {

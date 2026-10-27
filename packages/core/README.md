@@ -1,8 +1,8 @@
 # @umar0x/decompress
 
 Native secure archive extraction for Node.js 22+. Supports ZIP, TAR, TAR.GZ, TAR.BZ2, and TAR.ZST with
-streamed file bodies, atomic output, resource ceilings, typed errors, audit/list APIs, ESM, and
-CommonJS.
+streamed file bodies, parallel bzip2 decoding, atomic output, resource ceilings, typed errors,
+audit/list APIs, ESM, and CommonJS. Installs as a single package with zero runtime dependencies.
 
 ```ts
 import { extract, auditArchive } from '@umar0x/decompress';
