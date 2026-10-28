@@ -32,6 +32,29 @@ Entry-level callbacks (`onEntry`, `onProgress`) are emitted in entry order. Job-
 concurrency belongs to the calling service, where disk, memory, and tenant quotas can
 be enforced explicitly.
 
+One exception lives below the entry pipeline: bzip2 decompression itself is parallel.
+See the next section.
+
+## Parallel bzip2 decoding
+
+A bzip2 stream is a sequence of independently compressed blocks. Before parsing begins,
+the tar.bz2 plugin scans the input for the 48-bit block and end-of-stream magics at every
+bit alignment (five known core bytes plus verified partial bits in the neighboring
+bytes), and when the stream has the exact single-stream shape the parallel path
+understands, blocks are dispatched to a small pool of worker threads
+(`min(4, availableParallelism)`) and emitted in order into the same sequential TAR
+pipeline. Every block CRC is verified by the decoder, and the stream CRC is folded from
+the block CRCs on the main thread and compared against the stored value.
+
+Anything unusual (multistream concatenations, trailing bytes, truncation, archives
+below 256 KiB, single-block streams) is handed to the sequential decoder with unchanged
+semantics. Memory stays bounded: at most six in-flight blocks of at most 900,000
+decompressed bytes each, regardless of archive size. A crafted archive that embeds a
+bit-exact block magic inside compressed data fails closed with a typed corruption
+error; the probability of that pattern occurring in honest data is about 2^-48 per
+position. The same magic-scanning trade-off is made by parallel bzip2 tools such as
+pbzip2.
+
 ## Input ownership
 
 - File paths stay file-backed and are opened by parser stream factories.
@@ -52,6 +75,16 @@ continues. Parser errors are normalized to typed corruption or unsupported-featu
 Plugin records are treated exactly like built-in parser records: types, paths, declared sizes,
 links, modes, transforms, and actual streamed bytes are validated before commit. Plugins are not a
 sandbox; they are ordinary code loaded into the caller's process.
+
+## Published artifact and dependencies
+
+The published package bundles its parser dependencies (`yauzl`, `tar-stream`, `unbzip2-stream`,
+and `seek-bzip`) into the ESM and CJS builds and ships a standalone CommonJS worker
+(`dist/bz2-worker.cjs`) for the parallel bzip2 decoder. Consumers install exactly one package
+with no transitive dependency tree. The bundling exists because `tar-stream`'s manifest drags in
+`bare-fs` and friends, which ship prebuilt native binaries for platforms this pure-JS library
+never touches; none of the code paths executed here even require `bare-fs`. In the repository the
+parsers remain normal devDependencies so tests run against the same sources that get bundled.
 
 ## Policy and writer boundary
 

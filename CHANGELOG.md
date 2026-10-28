@@ -3,6 +3,89 @@
 All notable changes are documented here. The project follows Keep a Changelog and Semantic
 Versioning.
 
+## [1.0.6] - 2026-10-27
+
+A performance, leanness, and reliability release. One real defect is fixed, bzip2 decoding is
+parallel, and the published package installs with zero runtime dependencies. No public type
+signatures changed and no security guarantees were relaxed.
+
+### Fixed
+
+- An extraction rejected for exceeding `maxDepth` left its private staging directory behind. The
+  cleanup walk capped recursion at 64 levels while the staging tree itself can be up to `maxDepth`
+  levels deep, so a 129-deep archive against the default 128 limit failed the depth check, cleaned
+  64 levels, and silently stranded the rest. The walk is now iterative and depth-unbounded (it
+  never follows symlinks, the staging root name is verified before deletion, and a leftover is
+  reported instead of swallowed). Found with a 129-level adversarial fixture during the 1.0.6
+  benchmark round; pinned by two regression tests.
+- Files are now created with their final sanitized mode directly instead of being opened 0600 and
+  chmod'ed after the body write. The staging root is 0700 and private to the process, so there was
+  no exposure window to justify the extra syscall. On-disk results are identical.
+
+### Added
+
+- Parallel bzip2 decoding. A bzip2 stream is a sequence of independently compressed blocks; the
+  tar.bz2 plugin now scans the input for the 48-bit block and end-of-stream magics at every bit
+  alignment and, when the stream has the exact single-stream shape, decodes blocks in a small
+  worker pool and emits the decompressed bytes in order. Every block CRC is verified by the
+  decoder and the stream CRC is folded and verified against the stored value, so the output is
+  byte-identical to the sequential decoder (pinned by direct equality tests). Multistream
+  concatenations, trailing bytes, truncation, single-block streams, and archives under 256 KiB
+  take the previous sequential path with unchanged semantics. In-flight blocks are capped, so
+  memory stays bounded regardless of archive size. Archives that deliberately embed a bit-exact
+  block magic inside compressed data fail closed with a typed corruption error; the same
+  magic-scanning trade-off is made by parallel bzip2 tools such as pbzip2.
+- The published package now bundles its parsers (`yauzl`, `tar-stream`, `unbzip2-stream`, and the
+  newly added `seek-bzip`) into the ESM and CJS builds and ships a standalone CommonJS worker for
+  the bzip2 pool. A fresh `npm install @umar0x/decompress` resolves one package and no transitive
+  tree: measured install weight drops from 7256 KB across 20 packages to 732 KB in one package.
+  The bundling exists because `tar-stream`'s manifest drags in `bare-fs`/`bare-path`/`bare-url`,
+  which ship prebuilt native binaries for platforms this pure-JS library never touches, and none
+  of the code paths executed here even require `bare-fs` (verified by loading and extracting with
+  the module entirely absent). Parsers remain devDependencies in the repository so tests run
+  against the same sources that get bundled, and the packaging smoke test now asserts the worker
+  artifact ships in the tarball.
+
+### Changed
+
+- `package.json` description and keywords were rewritten to match what the library actually does,
+  because the previous ones no longer reflected the format coverage or the security positioning.
+- Dev tree updated: `tsup` 9.0.0 (build verified end to end, including the dual-format bundle and
+  worker entry) and `typescript-eslint` 8.72.1. TypeScript stays on 5.9: `typescript-eslint`
+  declares `typescript <6.1.0`, which excludes the 7.0 line.
+
+### Testing and quality
+
+- 377 tests (was 348). New suites: 13 bit-level and scanner tests (planted magics at every bit
+  alignment, chunk-boundary spanning, multistream/truncation rejection), 10 parallel-decode
+  integration tests (byte equality against the sequential decoder for file and buffer inputs,
+  end-to-end extraction, stream-CRC corruption, block corruption, abort mid-decode, fallback
+  selection), and 6 release regression tests (staging cleanup on depth violations, final file
+  modes, zero-dependency manifest, packed-artifact extraction through both module systems).
+- Coverage 93.25 percent statements, 84.43 percent branches, 97.66 percent functions. Per-file
+  floors unchanged and passing. The bzip2 worker entry itself is excluded from line coverage
+  (its logic lives in a module the suite exercises directly; worker threads are invisible to the
+  main-process instrumentation).
+
+### Performance
+
+Warm medians, same corpus and 5-run methodology as the 1.0.5 round, both versions re-measured
+back to back in one clean session on the same 2-vCPU host (an earlier round was discarded after
+archive fixture generation ran concurrently with it; the raw data of both rounds is retained):
+
+- TAR.BZ2, one 64 MiB file: 4364 ms -> 2587 ms (-41 percent), now ahead of both competitors
+  (decompress 4.2.1: 2960 ms, @xhmikosr/decompress 11.1.4: 3064 ms)
+- Deep tree, 64 levels: 32 ms -> 24 ms
+- npm tarball (typescript, 132 files): 162 ms -> 137 ms
+- Peak RSS, 10,000-file TAR.BZ2: 320 MB -> 216 MB (-32 percent)
+- Install weight: 7256 KB across 20 packages -> 732 KB in one package
+
+Every other scenario is within this host's run-to-run noise band (the five warm runs of the
+10,000-file plain TAR scenario span 1618-2542 ms on 1.0.5 alone), so I am not claiming wins there.
+The removed per-file fchmod syscall is real but below measurement resolution. Raw run data (five
+runs per scenario per library with means, standard deviations, minima, and maxima) is preserved
+with the release notes.
+
 ## [1.0.5] - 2026-10-15
 
 A reliability and release-engineering release. One real defect is fixed, extraction of
