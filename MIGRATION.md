@@ -71,6 +71,8 @@ It is a migration bridge, not a claim of byte-for-byte parity for every undocume
 | Unbounded compatibility memory                      | `maxInMemorySize` ceiling (default 256 MiB) (1.x)                                         | Raise explicitly for trusted large-archive workloads                       |
 | Sequential writes                                   | ZIP writes use a bounded worker pool (default 8)                                          | Set `concurrency: 1` for strictly sequential writes                        |
 | Inconsistent `detectedFormats` across APIs (1.0.2)  | All three APIs report the plugin name (1.0.3)                                             | Update consumers branching on `'gz'` / `'bz2'` to `'tar.gz'` / `'tar.bz2'` |
+| Transitive install tree from format plugins         | Single package, zero runtime dependencies (1.0.6)                                         | None; tarballs now bundle their parsers                                    |
+| Sequential bzip2 decode                             | Parallel block decode for multi-block streams (1.0.6); identical output, typed errors     | None; unusual streams take the previous sequential path                    |
 
 ### Legacy plugins
 

@@ -23,6 +23,9 @@ files.
 | Operating system and Node runtime         | Trusted computing base                                 |
 
 The library makes no network requests. It does not authenticate an archive's origin or signature.
+The parallel bzip2 decoder spawns short-lived worker threads from a bundled artifact inside the
+package; they run the same trusted parser code on attacker-controlled bytes and return only
+verified decompressed blocks.
 
 ## Main attack classes and controls
 
@@ -81,7 +84,10 @@ an older, buffered contract.
 - `auditArchive()` is a static risk report, not malware scanning or content validation.
 - Encrypted archives, RAR, and 7z are unsupported rather than inspected.
 - Archive parsing still consumes CPU. Apply external timeouts, process isolation, quotas, and
-  concurrency limits for hostile multi-tenant workloads.
+  concurrency limits for hostile multi-tenant workloads. The parallel bzip2 path bounds its own
+  worker count and in-flight blocks; a crafted archive with an embedded block-magic pattern fails
+  closed with a typed corruption error rather than extracting (the same trade-off parallel bzip2
+  tools such as pbzip2 make).
 
 ## Deployment hardening
 

@@ -7,7 +7,6 @@ import {
   ensureNotSymlink,
   safeChmod,
   safeClose,
-  safeFchmod,
   safeHardlink,
   safeLstat,
   safeMkdir,
@@ -46,7 +45,6 @@ test('filesystem wrappers create, write, link, rename, and remove safely', async
     const file = nodePath.join(directory, 'file.txt');
     const handle = await safeOpenExclusive(file, 0o600);
     await safeWriteAll(handle, Buffer.from('content'));
-    await safeFchmod(handle, 0o600);
     await safeClose(handle);
     assert.equal(await readFile(file, 'utf8'), 'content');
     await assert.rejects(() => safeOpenExclusive(file, 0o600), { code: 'EEXIST' });

@@ -1,6 +1,8 @@
 # Examples
 
-Runnable against the built packages. From the repository root:
+Runnable against the built packages. Each example expects an archive named in its source
+(`release.zip`, `bundle.zip`, or similar) in the working directory; substitute your own. From the
+repository root:
 
 ```sh
 npm install

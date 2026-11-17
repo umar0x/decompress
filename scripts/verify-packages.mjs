@@ -14,7 +14,12 @@ mkdirSync(consumer);
 
 try {
   const tarballs = [
-    pack('@umar0x/decompress', ['dist/index.js', 'dist/index.cjs', 'dist/index.d.ts']),
+    pack('@umar0x/decompress', [
+      'dist/index.js',
+      'dist/index.cjs',
+      'dist/index.d.ts',
+      'dist/bz2-worker.cjs',
+    ]),
     pack('@umar0x/decompress-compatible', ['dist/index.js', 'dist/index.cjs', 'dist/index.d.ts']),
     pack('@umar0x/decompress-cli', [
       'dist/cli.js',
@@ -43,6 +48,12 @@ try {
     'cli.js',
   );
   if (!existsSync(cli)) throw new Error('packed CLI is missing dist/cli.js');
+
+  const core = nodePath.join(consumer, 'node_modules', '@umar0x', 'decompress');
+  const worker = nodePath.join(core, 'dist', 'bz2-worker.cjs');
+  if (!existsSync(worker)) {
+    throw new Error('packed @umar0x/decompress is missing dist/bz2-worker.cjs');
+  }
 
   run(
     process.execPath,

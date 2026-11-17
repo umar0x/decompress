@@ -1,7 +1,7 @@
 {
   "name": "@umar0x/decompress",
-  "version": "1.0.5",
-  "description": "Secure archive extraction for Node.js. Hardened against Zip Slip, symlink escapes, hardlink escapes, unsafe permissions, Windows path tricks, and zip bombs.",
+  "version": "1.0.6",
+  "description": "Secure, fast archive extraction for Node.js. ZIP, TAR, TAR.GZ, TAR.BZ2, and TAR.ZST with parallel bzip2, atomic commits, and hardening against Zip Slip, symlink escapes, hardlink escapes, zip bombs, and Windows path tricks.",
   "license": "MIT",
   "author": "umar0x <hello@umar.ac>",
   "repository": {
@@ -43,19 +43,30 @@
   "keywords": [
     "extract",
     "archive",
+    "unzip",
+    "untar",
     "zip",
     "tar",
     "gzip",
     "bzip2",
+    "zstd",
+    "tar.gz",
+    "tar.bz2",
+    "tar.zst",
     "decompress",
-    "unzip",
+    "uncompress",
     "secure",
     "zip-slip",
-    "symlink"
+    "path-traversal",
+    "symlink",
+    "zip-bomb",
+    "nodejs",
+    "file-compression"
   ],
-  "dependencies": {
+  "devDependencies": {
     "tar-stream": "^3.2.1",
     "yauzl": "^3.4.0",
-    "unbzip2-stream": "^1.4.3"
+    "unbzip2-stream": "^1.4.3",
+    "seek-bzip": "^2.0.0"
   }
 }

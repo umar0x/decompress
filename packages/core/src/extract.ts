@@ -297,7 +297,10 @@ async function doExtract(
       limits,
       policy,
       signal: opts.signal,
-      concurrency: opts.concurrency,
+      // Duplicate/case-collision overwrite semantics are defined by entry order:
+      // later entries must overwrite earlier ones deterministically.
+      // Force sequential writes when overwrite groups exist to avoid races.
+      concurrency: overwriteEntryIndices.size > 0 ? 1 : opts.concurrency,
       perEntryOverwrite: overwriteEntryIndices,
       onEntry: (written, index) => opts.onEntry?.(toEntry(written, metadata[index]!)),
       onWarning: (warning) => {
